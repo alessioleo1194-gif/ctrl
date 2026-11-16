@@ -1,5 +1,12 @@
 # Registro delle modifiche
 
+## 0.1.1 · Correzione setup (16/11/2026)
+
+- Setup: il nome del foglio iniziale ora si legge prima di eliminarlo. Su Google la vecchia versione si fermava
+  con "Foglio … non trovato" dopo aver creato le tabelle, senza creare admin, attività automatiche e prima sincronizzazione.
+- Simulatore dei test: un foglio eliminato non è più utilizzabile, come su Google.
+- CI: lockfile rigenerato dal registro npm.
+
 ## 0.1.0 · Fase 1, fondamenta (16/11/2026)
 
 - Server Apps Script con API unica, ambienti produzione e test separati.

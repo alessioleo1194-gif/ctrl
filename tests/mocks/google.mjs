@@ -46,7 +46,9 @@ class Range {
 
 class Sheet {
   constructor(name) { this.name = name; this.data = []; this.formats = new Map(); this.maxRows = 1000; }
-  getName() { return this.name; }
+  getName() { this.alive(); return this.name; }
+  /** Come Google: un foglio eliminato non si può più usare. */
+  alive() { if (this.deleted) throw new Error(`Foglio ${this.name} non trovato`); }
   cell(r, c) { const row = this.data[r - 1]; const v = row ? row[c - 1] : undefined; return v === undefined ? '' : v; }
   write(r, c, v) {
     while (this.data.length < r) this.data.push([]);
@@ -59,6 +61,7 @@ class Sheet {
     row[c - 1] = v;
   }
   getLastRow() {
+    this.alive();
     for (let i = this.data.length; i > 0; i--) if (this.data[i - 1].some(v => v !== '' && v !== undefined)) return i;
     return 0;
   }
@@ -79,7 +82,7 @@ class Spreadsheet {
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   insertSheet(n) { const s = new Sheet(n); this.sheets.push(s); return s; }
   getSheets() { return this.sheets.slice(); }
-  deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
+  deleteSheet(s) { s.alive(); s.deleted = true; this.sheets = this.sheets.filter(x => x !== s); }
   setSpreadsheetTimeZone(tz) { this.tz = tz; }
 }
 

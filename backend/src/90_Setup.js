@@ -69,10 +69,12 @@ function setup_(env) {
   });
 
   // Rimuove il foglio iniziale vuoto creato con il file.
+  // Il nome si legge prima di eliminare: dopo deleteSheet il foglio non è più utilizzabile.
   ss.getSheets().forEach(function (sh) {
-    if (!SCHEMA[sh.getName()] && ss.getSheets().length > 1 && sh.getLastRow() <= 2) {
+    var nome = sh.getName();
+    if (!SCHEMA[nome] && ss.getSheets().length > 1 && sh.getLastRow() <= 2) {
       ss.deleteSheet(sh);
-      log.push('Rimosso foglio iniziale ' + sh.getName());
+      log.push('Rimosso foglio iniziale ' + nome);
     }
   });
 
