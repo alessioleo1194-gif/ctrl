@@ -30,6 +30,7 @@ function calendar() {
 }
 
 async function setup(page, { calendarEvents = calendar() } = {}) {
+  await page.route(/script\.google(usercontent)?\.com/, (r) => r.abort()); // mai i server veri
   const env = loadBackend({ adminEmail: ADMIN, calendarEvents });
   page.on('console', (m) => { if (m.type() === 'error' && /Content Security Policy|Refused/.test(m.text())) cspErrors.push(m.text()); });
   env.ctx.setupProduzione();
@@ -188,6 +189,7 @@ test('sessione revocata: si torna all\'accesso', async ({ page }) => {
 });
 
 test('API non configurata: messaggio chiaro', async ({ page }) => {
+  await page.addInitScript(() => { window.__CTRL_API__ = ''; });
   await page.goto('/');
   await expect(page.getByText(/non è ancora collegato al server/)).toBeVisible();
 });
