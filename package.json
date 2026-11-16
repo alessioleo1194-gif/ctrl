@@ -1,0 +1,21 @@
+{
+  "name": "ctrl",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CTRL · centro di comando della produzione eventi",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-backend.mjs",
+    "check": "node scripts/build-backend.mjs --check",
+    "test": "npm run test:backend && npm run test:e2e",
+    "test:backend": "node --test tests/backend/*.test.mjs",
+    "test:e2e": "playwright test",
+    "serve": "node scripts/serve.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
