@@ -10,7 +10,7 @@ export const API = {
 };
 
 /** Domini considerati produzione (il sito Netlify principale). */
-export const PROD_HOSTS = [];
+export const PROD_HOSTS = ['ctrl-alessioleo.netlify.app'];
 
 export function environment(host = location.hostname) {
   if (PROD_HOSTS.includes(host)) return 'prod';
