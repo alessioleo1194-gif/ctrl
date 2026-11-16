@@ -3,8 +3,9 @@ import { h, icon, toast, loading } from '../ui.js';
 import { store, navigate, upsertEvent } from '../app.js';
 import { dateRange, timeRange, stamp } from '../format.js';
 import { openEventForm } from './eventForm.js';
+import { sectionCard, ORDINE } from './sections.js';
 
-/** Dettaglio evento · scheda Info (Fase 1). */
+/** Dettaglio evento: informazioni, piano, materiale, scheda tecnica, note. */
 export async function renderEvent(pane, id) {
   pane.replaceChildren(loading('Apertura evento…'));
   let ev;
@@ -49,7 +50,7 @@ function draw(pane, ev) {
 
   const notes = notesCard(ev, p, (upd) => draw(pane, upd));
 
-  const roadmap = h('p', { class: 'help' }, 'Piano di produzione, lista materiale e scheda tecnica saranno disponibili con la Fase 2.');
+  const sezioni = ORDINE.map(k => sectionCard(ev, k));
 
   const admin = p.admin ? adminCard(ev, pane) : null;
   const histo = p.admin && ev.storico?.length ? h('section', { class: 'card' },
@@ -58,7 +59,7 @@ function draw(pane, ev) {
       h('span', { class: 'mono help' }, stamp(s.ts)),
       h('span', {}, h('b', {}, s.email === 'calendar' ? 'Calendar' : s.email), ' · ', s.azione, s.dopo ? h('span', { class: 'help' }, ' ' + s.dopo.slice(0, 140)) : null))))) : null;
 
-  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, notes, roadmap, admin, histo));
+  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, ...sezioni, notes, admin, histo));
 }
 
 function notesCard(ev, p, redraw) {

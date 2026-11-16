@@ -17,6 +17,12 @@ var ACTIONS = {
   'eventi.update': { fn: function (u, p) { return Events.update(u, p); } },
   'eventi.stato': { fn: function (u, p) { return Events.setStato(u, p); } },
 
+  'sezioni.righe': { fn: function (u, p) { return Sezioni.salvaRighe(u, p); } },
+  'sezioni.testo': { fn: function (u, p) { return Sezioni.salvaTesto(u, p); } },
+  'allegati.carica': { fn: function (u, p) { return Sezioni.carica(u, p); } },
+  'allegati.scarica': { fn: function (u, p) { return Sezioni.scarica(u, p); } },
+  'allegati.elimina': { fn: function (u, p) { return Sezioni.elimina(u, p); } },
+
   'sync.run': { fn: function (u) { Users.require(u, 'impostazioni'); return CalendarSync.run(u.email); } },
 
   'impostazioni.get': { fn: function () { return Settings.get(); } },

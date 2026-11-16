@@ -291,8 +291,11 @@ test('backup settimanale: copia il database e ne tiene al massimo 8', () => {
     env.ctx.backupSettimanale();
     env.ctx.Utilities.formatDate = realFmt;
   }
-  const files = env.state.drive.folders.get(env.state.props.BACKUP_ID);
+  const files = [...env.state.drive.files.values()].filter(f => f.parent === env.state.props.BACKUP_ID);
+  assert.equal(files.length, 10);
   assert.equal(files.filter(f => !f.trashed).length, 8);
+  // restano le 8 più recenti
+  assert.deepEqual(files.filter(f => f.trashed).map(f => f.name).sort(), ['CTRL backup 2026-11-10 04.00', 'CTRL backup 2026-11-11 04.00']);
 });
 
 test('errore interno: messaggio generico, nessun dettaglio esposto', () => {

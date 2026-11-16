@@ -80,7 +80,7 @@ var Db = (function () {
    * Aggiorna una riga trovata per chiave. Se expectedVersion è indicato e non
    * coincide, rifiuta con CONFLICT (qualcun altro ha salvato prima).
    */
-  function update(name, keyField, keyValue, patch, expectedVersion) {
+  function update(name, keyField, keyValue, patch, expectedVersion, keepVersion) {
     var t = read(name);
     var row = find(name, keyField, keyValue);
     if (!row) throw new CtrlError('NOT_FOUND', 'Elemento non trovato');
@@ -90,7 +90,8 @@ var Db = (function () {
     var next = {};
     t.head.forEach(function (h) { next[h] = row[h]; });
     Object.keys(patch).forEach(function (k) { if (t.head.indexOf(k) >= 0) next[k] = patch[k]; });
-    if (t.head.indexOf('versione') >= 0) next.versione = String((parseInt(row.versione, 10) || 0) + 1);
+    // keepVersion: campi tecnici (es. cartella Drive) che non devono invalidare le modifiche aperte da altri.
+    if (t.head.indexOf('versione') >= 0 && !keepVersion) next.versione = String((parseInt(row.versione, 10) || 0) + 1);
     var values = toRow(t.head, next);
     var range = t.sheet.getRange(row._row, 1, 1, t.head.length);
     range.setNumberFormat('@');

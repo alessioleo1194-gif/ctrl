@@ -106,7 +106,7 @@ export function createGoogle({ adminEmail = 'admin@example.com', calendarEvents 
   const state = {
     props: {}, cache: new Map(), mails: [], triggers: [], spreadsheets: new Map(), now: () => Date.now(),
     calendar: { id: 'cal@group.calendar.google.com', color: '#9fc6e7', events: calendarEvents },
-    drive: { files: new Map(), folders: new Map() }, adminEmail, logs: []
+    drive: { files: new Map(), folders: new Map() }, driveFail: false, adminEmail, logs: []
   };
   const getSS = id => { if (!state.spreadsheets.has(id)) state.spreadsheets.set(id, new Spreadsheet(id)); return state.spreadsheets.get(id); };
 
@@ -126,7 +126,13 @@ export function createGoogle({ adminEmail = 'admin@example.com', calendarEvents 
       getUuid: () => crypto.randomUUID(),
       DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
       computeDigest: (alg, s) => Array.from(crypto.createHash('sha256').update(String(s), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
-      formatDate
+      formatDate,
+      base64Decode: (b64) => {
+        if (!/^[A-Za-z0-9+/=\s]*$/.test(b64)) throw new Error('Could not decode string.');
+        return Array.from(Buffer.from(b64, 'base64')).map(b => (b > 127 ? b - 256 : b));
+      },
+      base64Encode: (bytes) => Buffer.from(bytes.map(b => (b + 256) % 256)).toString('base64'),
+      newBlob: (bytes, mime, name) => ({ bytes, mime, name })
     },
     MailApp: { sendEmail: (o) => { state.mails.push(o); } },
     ContentService: {
@@ -155,21 +161,54 @@ export function createGoogle({ adminEmail = 'admin@example.com', calendarEvents 
         return b;
       }
     },
-    DriveApp: {
-      getFolderById: (id) => {
-        if (!state.drive.folders.has(id)) state.drive.folders.set(id, []);
-        const list = state.drive.folders.get(id);
-        return { getId: () => id, getFiles: () => { let i = 0; const arr = list.filter(f => !f.trashed); return { hasNext: () => i < arr.length, next: () => arr[i++].api }; } };
-      },
-      getFileById: (id) => ({
+    DriveApp: (() => {
+      // Drive simulato: cartelle e file con id, contenuto (byte con segno come in Apps Script) e cestino.
+      const D = state.drive;
+      const newId = () => 'drv_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+      const ensureFolder = (id, name = '') => {
+        if (!D.folders.has(id)) D.folders.set(id, { id, name, parent: null, trashed: false });
+        return D.folders.get(id);
+      };
+      const fileApi = (f) => ({
+        getId: () => f.id, getName: () => f.name, getSize: () => f.bytes.length, getMimeType: () => f.mime,
+        isTrashed: () => f.trashed, setTrashed: (v) => { f.trashed = !!v; },
+        getBlob: () => ({ getBytes: () => f.bytes.slice() }),
         makeCopy: (name, folder) => {
-          const f = { name, trashed: false };
-          f.api = { getName: () => f.name, setTrashed: (v) => { f.trashed = v; } };
-          state.drive.folders.get(folder.getId()).push(f);
-          return f.api;
+          const c = { id: newId(), name, mime: f.mime, bytes: f.bytes.slice(), parent: folder.getId(), trashed: false };
+          D.files.set(c.id, c); return fileApi(c);
         }
-      })
-    },
+      });
+      const folderApi = (fo) => ({
+        getId: () => fo.id, getName: () => fo.name,
+        createFolder: (name) => {
+          const c = { id: newId(), name, parent: fo.id, trashed: false };
+          D.folders.set(c.id, c); return folderApi(c);
+        },
+        createFile: (blob) => {
+          if (state.driveFail) throw new Error('Drive non disponibile');
+          const f = { id: newId(), name: blob.name, mime: blob.mime, bytes: blob.bytes.slice(), parent: fo.id, trashed: false };
+          D.files.set(f.id, f); return fileApi(f);
+        },
+        getFiles: () => {
+          const arr = [...D.files.values()].filter(f => f.parent === fo.id && !f.trashed);
+          let i = 0; return { hasNext: () => i < arr.length, next: () => fileApi(arr[i++]) };
+        }
+      });
+      return {
+        getFolderById: (id) => {
+          const fo = D.folders.get(id);
+          if (fo && fo.trashed) throw new Error('Cartella non trovata: ' + id);
+          return folderApi(ensureFolder(id));
+        },
+        getFileById: (id) => {
+          // il database (foglio) esiste sempre come file
+          if (!D.files.has(id) && state.spreadsheets.has(id)) D.files.set(id, { id, name: 'DB', mime: 'application/vnd.google-apps.spreadsheet', bytes: [1], parent: null, trashed: false });
+          const f = D.files.get(id);
+          if (!f) throw new Error('File non trovato: ' + id);
+          return fileApi(f);
+        }
+      };
+    })(),
     console: { log: (...a) => state.logs.push(a.join(' ')), error: (...a) => state.logs.push('ERR ' + a.join(' ')), warn: () => {} }
   };
   return { google, state, getSS };

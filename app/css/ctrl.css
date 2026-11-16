@@ -195,6 +195,62 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.45; }
 .histo div:first-child { border-top: 0; }
 @media (max-width: 520px) { .histo div { grid-template-columns: 1fr; gap: 2px; } }
 
+/* ---------- sezioni di produzione ---------- */
+.sec-title { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.sec-ico { width: 20px; height: 20px; color: var(--line-strong); flex: none; }
+.sec-ico.on.piano, .sec-ico.on.scheda { color: var(--ok); }
+.sec-ico.on.materiale { color: var(--mat); }
+.sec-body, .sec-edit { display: grid; gap: 14px; }
+.sec-text { padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius-s); border: 1px solid var(--line); }
+.tbl-wrap { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tbl th { text-align: left; font: 600 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--mute); padding: 6px 10px 8px 0; border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
+.tbl td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl td.mono { white-space: nowrap; }
+@media (max-width: 600px) {
+  .tbl-wrap { margin: 0; padding: 0; overflow: visible; }
+  .tbl thead { display: none; }
+  .tbl, .tbl tbody, .tbl tr, .tbl td { display: block; width: auto; }
+  .tbl tr { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 96px 1fr; gap: 2px 10px; }
+  .tbl tr:last-child { border-bottom: 0; }
+  .tbl td { border: 0; padding: 0; display: contents; }
+  .tbl td::before { content: attr(data-l); color: var(--mute); font-size: 12px; padding-top: 2px; }
+}
+.files { display: grid; gap: 8px; }
+.file { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface-2); }
+.file-main { flex: 1; min-width: 0; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 10px; align-items: center; padding: 10px 12px; border: 0; background: none; text-align: left; cursor: pointer; color: inherit; }
+.file-main svg { width: 18px; height: 18px; color: var(--mute); grid-row: span 2; }
+.file-main .file-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+.file-main:hover .file-name { text-decoration: underline; }
+.file .iconbtn { margin-right: 4px; color: var(--mute); }
+.file .iconbtn.armed { color: var(--danger); border-color: var(--danger); font-size: 13px; font-weight: 600; }
+.file-add { justify-self: start; cursor: pointer; }
+.files .status-line:empty { display: none; }
+.file-add:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.rows { display: grid; gap: 8px; }
+.rows-head, .rrow { display: grid; grid-template-columns: var(--cols); gap: 6px; align-items: center; }
+.rows-head span { font: 600 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--mute); }
+.rrow .cell { min-width: 0; }
+.rrow .cell-l { display: none; }
+.rrow .input { min-height: 40px; padding: 8px 10px; font-size: 15px; }
+.rtools { display: flex; gap: 0; }
+.rtools .iconbtn { min-width: 34px; height: 40px; padding: 0 6px; }
+.rtools .iconbtn svg { width: 18px; height: 18px; }
+.rtools .iconbtn[disabled] { opacity: .3; cursor: default; }
+.sec-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.sec-actions .status-line { flex: 1; min-width: 180px; }
+@media (max-width: 760px) {
+  .rows-head { display: none; }
+  .rrow { grid-template-columns: 1fr 1fr; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface-2); }
+  .rrow .cell { display: grid; gap: 3px; }
+  .rrow .cell.req, .rrow .cell:has(select) { grid-column: 1 / -1; }
+  .rrow .cell-l { display: block; font-size: 12px; color: var(--mute); }
+  .rtools { grid-column: 1 / -1; justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 6px; }
+  .sec-actions .row { width: 100%; }
+  .sec-actions .row .btn { flex: 1; }
+}
+
 /* ---------- pannelli (dialog) ---------- */
 dialog.sheet {
   border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(560px, calc(100vw - 32px));

@@ -72,6 +72,16 @@ function fatal(err) {
     h('button', { class: 'btn', onclick: () => start() }, 'Riprova'))));
 }
 
+let current = null;
+
+/** Ridisegna la lista eventi (es. indicatori cambiati) senza perdere la posizione di scorrimento. */
+export function refreshList() {
+  if (!current || !current.listPane.isConnected || !store.events) return;
+  const y = window.scrollY;
+  renderList(current.listPane, current.selected);
+  window.scrollTo(0, y);
+}
+
 async function route() {
   if (!store.user) return;
   const hash = location.hash || '#/';
@@ -101,6 +111,7 @@ async function route() {
     listPane.replaceChildren(h('div', { class: 'empty' }, h('div', { class: 'banner' }, e.message), h('p', {}, h('button', { class: 'btn', onclick: () => { store.events = null; route(); } }, 'Riprova'))));
     return;
   }
+  current = { listPane, selected };
   renderList(listPane, selected);
   if (selected) renderEvent(detailPane, selected);
   else detailPane.append(h('div', { class: 'empty desk-only', style: { paddingTop: '120px' } }, h('span', { class: 'label' }, 'Nessun evento selezionato'), h('p', {}, 'Scegli un evento dalla lista.')));

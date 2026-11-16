@@ -57,6 +57,7 @@ var Events = (function () {
     var e = Db.find('eventi', 'id', p && p.id);
     if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
     var out = view(e, contaSezioni(), user);
+    out.sezioni = Sezioni.tutte(e.id);
     if (Users.can(user, 'admin')) out.storico = Storico.forEvent(e.id, 30);
     return out;
   }
@@ -139,7 +140,7 @@ var Events = (function () {
       var row = Db.update('eventi', 'id', p.id, patch, p.versione);
       var d = Storico.diff(before, row, CAL_FIELDS.concat(['note']));
       if (d.changed) Storico.log(user.email, row.id, 'evento', 'modifica', row.id, d.prima, d.dopo);
-      return view(row, contaSezioni(), user);
+      return get(user, { id: row.id });
     });
   }
 
@@ -153,7 +154,7 @@ var Events = (function () {
       var prima = e.stato;
       var row = Db.update('eventi', 'id', p.id, { stato: stato, aggiornato_il: Util.nowIso(), aggiornato_da: user.email }, p.versione);
       Storico.log(user.email, row.id, 'evento', 'stato', row.id, prima, stato);
-      return view(row, contaSezioni(), user);
+      return get(user, { id: row.id });
     });
   }
 

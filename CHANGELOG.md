@@ -1,5 +1,18 @@
 # Registro delle modifiche
 
+## 0.2.0 · Fase 2, sezioni di produzione (16/11/2026)
+
+- Ogni evento ha tre sezioni: **piano di produzione**, **lista materiale**, **scheda tecnica**.
+  Ognuna si compila con righe strutturate, testo libero e file allegati, anche insieme.
+  - Piano: inizio, fine, attività, responsabile, note.
+  - Materiale: quantità, voce, area e provenienza (tendine delle impostazioni), note.
+  - Scheda tecnica: channel list (n., sorgente, microfono, DI, asta, note) con numerazione automatica.
+- File allegati salvati su Drive nella cartella dell'evento (creata al primo caricamento), massimo 20 MB per file.
+  Download dall'app per tutti i ruoli; tolti finiscono nel cestino di Drive (solo admin o chi li ha caricati).
+- Indicatori della lista aggiornati subito dopo ogni salvataggio.
+- Protezione dalle sovrascritture per sezione: se un altro salva prima, l'app avvisa e non perde dati.
+- Salvare la cartella Drive di un evento non invalida più le modifiche aperte sulle note.
+
 ## 0.1.1 · Correzione setup (16/11/2026)
 
 - Setup: il nome del foglio iniziale ora si legge prima di eliminarlo. Su Google la vecchia versione si fermava
