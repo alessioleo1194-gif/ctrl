@@ -17,11 +17,17 @@ var ACTIONS = {
   'eventi.update': { fn: function (u, p) { return Events.update(u, p); } },
   'eventi.stato': { fn: function (u, p) { return Events.setStato(u, p); } },
 
-  'sezioni.righe': { fn: function (u, p) { return Sezioni.salvaRighe(u, p); } },
-  'sezioni.testo': { fn: function (u, p) { return Sezioni.salvaTesto(u, p); } },
-  'allegati.carica': { fn: function (u, p) { return Sezioni.carica(u, p); } },
-  'allegati.scarica': { fn: function (u, p) { return Sezioni.scarica(u, p); } },
-  'allegati.elimina': { fn: function (u, p) { return Sezioni.elimina(u, p); } },
+  'allegati.carica': { fn: function (u, p) { return Allegati.carica(u, p); } },
+  'allegati.scarica': { fn: function (u, p) { return Allegati.scarica(u, p); } },
+  'allegati.elimina': { fn: function (u, p) { return Allegati.elimina(u, p); } },
+
+  'produzione.get': { fn: function (u, p) { return Produzioni.get(u, p); } },
+  'produzione.crea': { fn: function (u, p) { return Produzioni.crea(u, p); } },
+  'produzione.collega': { fn: function (u, p) { return Produzioni.collega(u, p); } },
+  'produzione.scollega': { fn: function (u, p) { return Produzioni.scollega(u, p); } },
+  'produzione.salva': { fn: function (u, p) { return Produzioni.salva(u, p); } },
+  'persone.list': { fn: function (u) { return Produzioni.rubrica(u); } },
+  'persone.elimina': { fn: function (u, p) { return Produzioni.eliminaPersona(u, p); } },
 
   'sync.run': { fn: function (u) { Users.require(u, 'impostazioni'); return CalendarSync.run(u.email); } },
 

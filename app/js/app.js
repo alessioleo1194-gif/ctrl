@@ -6,6 +6,7 @@ import { renderList } from './views/events.js';
 import { renderEvent } from './views/event.js';
 import { openEventForm } from './views/eventForm.js';
 import { renderSettings } from './views/settings.js';
+import { renderProduzione } from './views/produzione.js';
 
 export const store = {
   user: null,
@@ -92,6 +93,13 @@ async function route() {
     const main = h('main');
     root.replaceChildren(bar, main);
     return renderSettings(main);
+  }
+
+  const pm = hash.match(/^#\/p\/([\w-]+)(?:\/(\w+))?/);
+  if (pm) {
+    const main = h('main');
+    root.replaceChildren(bar, main);
+    return renderProduzione(main, pm[1], pm[2]);
   }
 
   const m = hash.match(/^#\/e\/([\w-]+)/);

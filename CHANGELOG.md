@@ -1,5 +1,21 @@
 # Registro delle modifiche
 
+## 0.3.0 · Scheda di produzione, tappa 1: fondamenta (16/11/2026)
+
+Riprogettazione approvata: https://claude.ai/artifact/KA68oPNgFcFPLGdnNMJWYQ
+
+- Nuova **scheda di produzione** per evento (pagina dedicata `#/p/<id>`): panoramica con stato dei blocchi
+  e avvisi, **Struttura** (giornate e spazi), **Persone** (squadra dalla rubrica comune).
+- Si crea dal dettaglio evento: giornate dalle date dell'evento, uno spazio dal suo luogo.
+- **Festival:** più eventi del Calendar nella stessa scheda; le giornate si aggiungono da sole.
+- **Salvataggio automatico** a lotti, con indicatore; se la rete cade riprova senza perdere né duplicare dati.
+- **Rubrica persone** comune a tutti gli eventi: chi può modificare aggiunge e modifica, solo l'admin toglie.
+- Le righe a mano di piano, materiale e scheda tecnica della 0.2.0 sono state tolte (mai andate in produzione):
+  restano i **file allegati** su Drive, raggruppati in un unico riquadro.
+- Corretto: le date inesistenti (es. 30 febbraio) non sono più accettate.
+- Database: nuove tabelle `giornate`, `persone`, `squadra`; colonne aggiunte a `progetti` e `location`.
+  Dopo l'aggiornamento del codice va rieseguito il setup (aggiunge solo ciò che manca).
+
 ## 0.2.0 · Fase 2, sezioni di produzione (16/11/2026)
 
 - Ogni evento ha tre sezioni: **piano di produzione**, **lista materiale**, **scheda tecnica**.

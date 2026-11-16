@@ -34,6 +34,6 @@ npm run serve        # app in locale su http://localhost:4173
 
 In produzione su https://ctrl-alessioleo.netlify.app.
 Fase 1 (fondamenta): accesso, ruoli, eventi dal Calendar e manuali, note di produzione, impostazioni, app installabile.
-Fase 2: piano di produzione, lista materiale, scheda tecnica (righe, testo, file su Drive).
+Scheda di produzione (in costruzione a tappe): struttura, persone e squadra; file allegati su Drive. Prossime tappe: programma, artisti e channel list, materiale calcolato, PDF.
 Prossime fasi: PDF completo (F3), link di condivisione (F4),
 pagina madre e festival (F5), consultazione offline (F6).

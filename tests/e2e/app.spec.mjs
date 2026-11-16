@@ -35,8 +35,10 @@ async function setup(page, { calendarEvents = calendar() } = {}) {
   page.on('console', (m) => { if (m.type() === 'error' && /Content Security Policy|Refused/.test(m.text())) cspErrors.push(m.text()); });
   env.ctx.setupProduzione();
   await page.addInitScript((url) => { window.__CTRL_API__ = url; }, API);
+  env.failSalva = 0; // simula la rete che cade sui salvataggi della scheda
   await page.route(API, async (route) => {
     const body = route.request().postData();
+    if (env.failSalva > 0 && JSON.parse(body).action === 'produzione.salva') { env.failSalva--; return route.abort('internetdisconnected'); }
     const out = JSON.parse(JSON.stringify(env.ctx.handleRequest(body)));
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
   });
@@ -205,7 +207,15 @@ test('tema scuro leggibile', async ({ page }, info) => {
   await page.screenshot({ path: `test-results/scuro-${info.project.name}.png`, fullPage: true });
 });
 
-// ---------------- Fase 2: piano, materiale, scheda tecnica ----------------
+// ---------------- File allegati ----------------
+
+function tokenFor(env, email) {
+  env.state.cache.clear();
+  env.ctx.handleRequest(JSON.stringify({ action: 'auth.requestCode', payload: { email } }));
+  const code = env.state.mails.at(-1).subject.match(/(\d{6})/)[1];
+  return env.ctx.handleRequest(JSON.stringify({ action: 'auth.verifyCode', payload: { email, code } })).data.token;
+}
+const apiCall = (env, token, action, payload) => env.ctx.handleRequest(JSON.stringify({ action, token, payload }));
 
 async function openEvent(page, env, title = 'Cantelmo: Maria Mazzotta') {
   await login(page, env);
@@ -213,159 +223,166 @@ async function openEvent(page, env, title = 'Cantelmo: Maria Mazzotta') {
   await expect(page.getByRole('heading', { name: title })).toBeVisible();
 }
 
-test('piano di produzione: compilo righe e testo, salvo, ritrovo; indicatore verde in lista', async ({ page }, info) => {
+test('file allegati: carico un rider, scarico identico, rifiuto oltre 20 MB, tolgo nel cestino; indicatore in lista', async ({ page }, info) => {
   const env = await setup(page);
   await openEvent(page, env);
-  const sec = page.locator('#sec-piano');
-  await expect(sec.getByText('Nessun orario, testo o file.')).toBeVisible();
-  await sec.getByRole('button', { name: 'Compila' }).click();
-  // una riga vuota pronta
-  await sec.locator('#piano-0-ora_inizio').fill('15:00');
-  await sec.locator('#piano-0-ora_fine').fill('17:30');
-  await sec.locator('#piano-0-attivita').fill('Carico e montaggio');
-  await sec.locator('#piano-0-responsabile').fill('Manuel');
-  await sec.getByRole('button', { name: 'Aggiungi attività' }).click();
-  await sec.locator('#piano-1-attivita').fill('Soundcheck');
-  await sec.locator('#piano-1-ora_inizio').fill('18:00');
-  await sec.getByLabel('Testo libero · Piano di produzione').fill('Ingresso carico da via Libertini');
-  await page.screenshot({ path: `test-results/piano-modifica-${info.project.name}.png`, fullPage: true });
-  await sec.getByRole('button', { name: 'Salva' }).click();
-  await expect(page.getByText('Piano di produzione salvato')).toBeVisible();
-  await expect(sec.locator('table')).toContainText('Carico e montaggio');
-  await expect(sec.locator('table')).toContainText('17:30');
-  await expect(sec.getByText('Ingresso carico da via Libertini')).toBeVisible();
-  await expect(sec.locator('.sec-ico.piano.on')).toHaveCount(1);
-  await noHorizontalScroll(page);
-  await page.screenshot({ path: `test-results/piano-${info.project.name}.png`, fullPage: true });
-
-  // davvero nel database
-  const sh = env.getSS(env.state.props.DB_ID).getSheetByName('attivita').rows().slice(1).filter(r => r[8] !== 'TRUE');
-  expect(sh.map(r => r[4])).toEqual(['Carico e montaggio', 'Soundcheck']);
-  // riordino: Soundcheck in alto, poi tolgo Carico
-  await sec.getByRole('button', { name: 'Modifica' }).click();
-  await sec.getByRole('button', { name: 'Sposta su riga 2' }).click();
-  await sec.getByRole('button', { name: 'Togli riga 2' }).click();
-  await sec.getByRole('button', { name: 'Salva' }).click();
-  await expect(sec.locator('tbody tr')).toHaveCount(1);
-  await expect(sec.locator('tbody')).toContainText('Soundcheck');
-
-  // indicatore in lista (su telefono si torna alla lista)
-  if (info.project.name === 'mobile') await page.getByRole('link', { name: 'Eventi', exact: true }).click();
-  const row = page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' });
-  await expect(row.locator('.ind .piano.on')).toHaveCount(1);
-  await expect(row.locator('.ind .materiale.on')).toHaveCount(0);
-});
-
-test('lista materiale: tendine dalle impostazioni, campo obbligatorio, annulla senza salvare', async ({ page }, info) => {
-  const env = await setup(page);
-  await openEvent(page, env);
-  const sec = page.locator('#sec-materiale');
-  await sec.getByRole('button', { name: 'Compila' }).click();
-  await sec.locator('#materiale-0-quantita').fill('2');
-  await sec.getByRole('button', { name: 'Salva' }).click();
-  await expect(sec.getByText('Riga 1: manca "Voce".')).toBeVisible();
-  await sec.locator('#materiale-0-voce').fill('Cassa attiva 12"');
-  await sec.locator('#materiale-0-area').selectOption('Audio');
-  await sec.locator('#materiale-0-provenienza').selectOption('Da noleggiare');
-  await sec.getByRole('button', { name: 'Salva' }).click();
-  await expect(sec.locator('table')).toContainText('Da noleggiare');
-  await expect(sec.locator('.sec-ico.materiale.on')).toHaveCount(1);
-  const r = env.getSS(env.state.props.DB_ID).getSheetByName('materiale').rows()[1];
-  expect([r[2], r[3], r[4], r[5]]).toEqual(['Cassa attiva 12"', '2', 'Audio', 'Da noleggiare']);
-
-  // annulla con modifiche chiede conferma e non salva
-  await sec.getByRole('button', { name: 'Modifica' }).click();
-  await sec.locator('#materiale-0-voce').fill('Cambiata');
-  await sec.getByRole('button', { name: 'Annulla' }).click();
-  await sec.getByRole('button', { name: 'Scarta modifiche?' }).click();
-  await expect(sec.locator('table')).toContainText('Cassa attiva 12"');
-  await noHorizontalScroll(page);
-  await page.screenshot({ path: `test-results/materiale-${info.project.name}.png`, fullPage: true });
-});
-
-test('scheda tecnica: channel list numerata, allego rider, scarico identico, tolgo il file', async ({ page }, info) => {
-  const env = await setup(page);
-  await openEvent(page, env);
-  const sec = page.locator('#sec-scheda');
-  await sec.getByRole('button', { name: 'Compila' }).click();
-  await expect(sec.locator('#scheda-0-numero')).toHaveValue('1');
-  await sec.locator('#scheda-0-sorgente').fill('Kick in');
-  await sec.locator('#scheda-0-microfono').fill('Beta 91');
-  await sec.getByRole('button', { name: 'Aggiungi canale' }).click();
-  await expect(sec.locator('#scheda-1-numero')).toHaveValue('2');
-  await sec.locator('#scheda-1-sorgente').fill('Basso');
-  await sec.locator('#scheda-1-di').fill('DI attiva');
-  await sec.getByRole('button', { name: 'Salva' }).click();
-  await expect(sec.locator('tbody tr')).toHaveCount(2);
-
-  // allega un file (contenuto binario)
+  const box = page.locator('#files-scheda');
   const content = Buffer.from(Array.from({ length: 2000 }, (_, i) => i % 256));
-  await sec.getByLabel('Allega file a Scheda tecnica').setInputFiles({ name: 'rider band.pdf', mimeType: 'application/pdf', buffer: content });
+  await box.getByLabel('Allega file a Scheda tecnica e rider').setInputFiles({ name: 'rider band.pdf', mimeType: 'application/pdf', buffer: content });
   await expect(page.getByText('File caricato')).toBeVisible();
-  await expect(sec.getByText('rider band.pdf')).toBeVisible();
+  await expect(box.getByText('rider band.pdf')).toBeVisible();
   const driveFile = [...env.state.drive.files.values()].find(f => f.name === 'rider band.pdf');
   expect(Buffer.from(driveFile.bytes.map(b => (b + 256) % 256)).equals(content)).toBe(true);
-  await page.screenshot({ path: `test-results/scheda-${info.project.name}.png`, fullPage: true });
-
-  // scarica: stesso contenuto
-  const [dl] = await Promise.all([page.waitForEvent('download'), sec.getByRole('button', { name: /Scarica rider band\.pdf/ }).click()]);
+  const [dl] = await Promise.all([page.waitForEvent('download'), box.getByRole('button', { name: /Scarica rider band\.pdf/ }).click()]);
   expect(dl.suggestedFilename()).toBe('rider band.pdf');
   const fs = await import('node:fs');
   expect(fs.readFileSync(await dl.path()).equals(content)).toBe(true);
-
-  // file troppo grande: rifiutato senza caricarlo
-  await sec.getByLabel('Allega file a Scheda tecnica').setInputFiles({ name: 'video.mov', mimeType: 'video/quicktime', buffer: Buffer.alloc(21 * 1024 * 1024) });
-  await expect(sec.getByText('video.mov: troppo grande (max 20 MB)')).toBeVisible();
-
-  // togli con conferma: finisce nel cestino di Drive
-  await sec.getByRole('button', { name: 'Togli rider band.pdf' }).click();
-  await sec.getByRole('button', { name: 'Conferma: togli rider band.pdf' }).click();
+  await box.getByLabel('Allega file a Scheda tecnica e rider').setInputFiles({ name: 'video.mov', mimeType: 'video/quicktime', buffer: Buffer.alloc(21 * 1024 * 1024) });
+  await expect(box.getByText('video.mov: troppo grande (max 20 MB)')).toBeVisible();
+  if (info.project.name === 'desktop') await expect(page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).locator('.ind .scheda.on')).toHaveCount(1);
+  await box.getByRole('button', { name: 'Togli rider band.pdf' }).click();
+  await box.getByRole('button', { name: 'Conferma: togli rider band.pdf' }).click();
   await expect(page.getByText('File spostato nel cestino di Drive')).toBeVisible();
-  await expect(sec.getByText('rider band.pdf')).toHaveCount(0);
+  await expect(box.getByText('rider band.pdf')).toHaveCount(0);
   expect(driveFile.trashed).toBe(true);
   await noHorizontalScroll(page);
 });
 
-test('sola lettura: vede e scarica, nessuna modifica né caricamento', async ({ page }) => {
+// ---------------- Tappa 1: scheda di produzione ----------------
+
+test('scheda di produzione: creo dall\'evento, struttura e squadra si salvano da sole e restano dopo il ricaricamento', async ({ page }, info) => {
   const env = await setup(page);
-  const tk = (email) => {
-    env.state.cache.clear();
-    env.ctx.handleRequest(JSON.stringify({ action: 'auth.requestCode', payload: { email } }));
-    const code = env.state.mails.at(-1).subject.match(/(\d{6})/)[1];
-    return env.ctx.handleRequest(JSON.stringify({ action: 'auth.verifyCode', payload: { email, code } })).data.token;
-  };
-  const adm = tk(ADMIN);
-  const evId = env.ctx.handleRequest(JSON.stringify({ action: 'eventi.list', token: adm })).data.find(e => e.titolo === 'Convegno Museo Castromediano').id;
-  env.ctx.handleRequest(JSON.stringify({ action: 'sezioni.righe', token: adm, payload: { evento_id: evId, sezione: 'materiale', versione: '0', righe: [{ voce: 'Proiettore', quantita: '1' }] } }));
-  env.ctx.handleRequest(JSON.stringify({ action: 'allegati.carica', token: adm, payload: { evento_id: evId, sezione: 'piano', nome: 'piano.pdf', mime: 'application/pdf', dati: Buffer.from('PIANO').toString('base64') } }));
-  env.ctx.handleRequest(JSON.stringify({ action: 'utenti.save', token: adm, payload: { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'LETTURA' } }));
+  const adm = tokenFor(env, ADMIN);
+  // una persona già in rubrica (da un altro evento)
+  const altra = apiCall(env, adm, 'produzione.crea', { evento_id: apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo.startsWith('Convegno')).id }).data;
+  apiCall(env, adm, 'produzione.salva', { id: altra.id, ops: [{ tipo: 'persona', azione: 'crea', id: 'per_rubrica000001', campi: { nome: 'Federico Rizzello', ruolo: 'Tecnico luci', telefono: '+39 333 111 2222' } }] });
+
+  await openEvent(page, env);
+  await page.getByRole('button', { name: 'Crea scheda di produzione' }).click();
+  await expect(page.getByRole('textbox', { name: 'Nome della scheda di produzione' })).toHaveValue('Cantelmo: Maria Mazzotta');
+  await expect(page.locator('.tile', { hasText: 'Struttura' })).toContainText('1 giornata · 1 spazio');
+  await expect(page.locator('.avvisi')).toContainText('Squadra vuota');
+  await page.screenshot({ path: `test-results/prod-panoramica-${info.project.name}.png`, fullPage: true });
+
+  // titolo
+  await page.getByRole('textbox', { name: 'Nome della scheda di produzione' }).fill('Maria Mazzotta · Cantelmo');
+  // struttura
+  await page.locator('.prod-nav').getByRole('link', { name: /Struttura/ }).click();
+  await page.getByLabel('Data della nuova giornata').fill(isoDay(1));
+  await page.getByRole('button', { name: 'Aggiungi giornata' }).click();
+  await page.getByLabel('Etichetta del ' + isoDay(1)).fill('Montaggio');
+  await page.getByLabel('Nome del nuovo spazio').fill('Palco principale');
+  await page.getByRole('button', { name: 'Aggiungi spazio' }).click();
+  const palco = page.locator('.lrow.spa').nth(1);
+  await palco.getByLabel('Tipo di spazio').selectOption('palco');
+  await palco.getByLabel('Note dello spazio').fill('Pedane 6x4, corrente 32A');
+  await page.getByRole('button', { name: 'Sposta su Palco principale' }).click();
+  await expect(page.locator('.lrow.spa').first().getByLabel('Nome dello spazio')).toHaveValue('Palco principale');
+  // nome vuoto: segnalato e non inviato
+  await page.locator('.lrow.spa').nth(1).getByLabel('Nome dello spazio').fill('');
+  await expect(page.locator('.lrow.spa').nth(1).getByLabel('Nome dello spazio')).toHaveAttribute('aria-invalid', 'true');
+  await page.locator('.lrow.spa').nth(1).getByLabel('Nome dello spazio').fill('Officine Cantelmo');
+  await expect(page.locator('.save-ind')).toHaveText(/Salvato alle/);
+  await noHorizontalScroll(page);
+  await page.screenshot({ path: `test-results/prod-struttura-${info.project.name}.png`, fullPage: true });
+
+  // persone: una nuova e una dalla rubrica
+  await page.locator('.prod-nav').getByRole('link', { name: /Persone/ }).click();
+  const cerca = page.getByLabel('Cerca o aggiungi una persona');
+  await cerca.fill('Manuel');
+  await page.getByRole('option', { name: 'Nuova persona «Manuel»' }).click();
+  await page.getByLabel('Ruolo', { exact: true }).fill('Fonico');
+  await page.getByLabel('Telefono', { exact: true }).fill('+39 333 000 0000');
+  await page.getByLabel('Email', { exact: true }).fill('non-email');
+  await page.getByRole('button', { name: 'Aggiungi alla squadra' }).click();
+  await expect(page.getByText('Email non valida.')).toBeVisible();
+  await page.getByLabel('Email', { exact: true }).fill('manuel@example.com');
+  await page.getByRole('button', { name: 'Aggiungi alla squadra' }).click();
+  await expect(page.getByText('Manuel aggiunto alla squadra')).toBeVisible();
+  await cerca.fill('luci');
+  await page.getByRole('option', { name: /Federico Rizzello/ }).click();
+  await page.getByLabel('Spazio di Federico Rizzello').selectOption({ label: 'Palco principale' });
+  await page.getByLabel('Ruolo di Manuel in questo evento').fill('Fonico di sala');
+  await expect(page.locator('.save-ind')).toHaveText(/Salvato alle/);
+  await noHorizontalScroll(page);
+  await page.screenshot({ path: `test-results/prod-persone-${info.project.name}.png`, fullPage: true });
+
+  // nel database
+  const db = env.getSS(env.state.props.DB_ID);
+  const pr = db.getSheetByName('progetti').rows().find(r => r[1] === 'Maria Mazzotta · Cantelmo');
+  expect(pr).toBeTruthy();
+  const pid = pr[0];
+  expect(db.getSheetByName('giornate').rows().filter(r => r[1] === pid).map(r => [r[2], r[3]]).sort()).toEqual([[isoDay(1), 'Montaggio'], [isoDay(2), '']]);
+  const spazi = db.getSheetByName('location').rows().filter(r => r[1] === pid);
+  expect(spazi.find(r => r[2] === 'Palco principale')[6]).toBe('palco');
+  const sq = db.getSheetByName('squadra').rows().filter(r => r[1] === pid);
+  expect(sq.length).toBe(2);
+
+  // ricarico: tutto è ancora lì
+  await page.reload();
+  await expect(page.getByText('Manuel', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Ruolo di Manuel in questo evento')).toHaveValue('Fonico di sala');
+  await expect(page.getByLabel('Spazio di Federico Rizzello')).toHaveValue(spazi.find(r => r[2] === 'Palco principale')[0]);
+  await page.locator('.prod-nav').getByRole('link', { name: /Panoramica/ }).click();
+  await expect(page.locator('.tile', { hasText: 'Persone' })).toContainText('2 in squadra');
+  await expect(page.getByText('Nessun avviso.')).toBeVisible();
+  // dal dettaglio evento si vede il riepilogo
+  await page.getByRole('link', { name: 'Evento' }).click();
+  await expect(page.locator('.prod-card')).toContainText('2 giornate, 2 spazi');
+});
+
+test('festival: aggiungo un secondo evento alla scheda e le giornate si aggiornano', async ({ page }) => {
+  const env = await setup(page);
+  await openEvent(page, env, 'Convegno Museo Castromediano');
+  await page.getByRole('button', { name: 'Crea scheda di produzione' }).click();
+  await expect(page.locator('.tile', { hasText: 'Struttura' })).toContainText('3 giornate');
+  await page.getByLabel('Cerca un evento da aggiungere').fill('swing');
+  await page.getByRole('option', { name: /Swing night/ }).click();
+  await expect(page.getByText('Evento aggiunto: giornate aggiornate')).toBeVisible();
+  await expect(page.locator('.tile', { hasText: 'Struttura' })).toContainText('4 giornate');
+  await expect(page.getByText('Scheda di produzione · festival')).toBeVisible();
+  await expect(page.locator('.ev-link')).toHaveCount(2);
+  await page.getByRole('button', { name: /Togli Cantelmo: Swing night/ }).click();
+  await page.getByRole('button', { name: /Conferma: Togli Cantelmo: Swing night/ }).click();
+  await expect(page.locator('.ev-link')).toHaveCount(1);
+});
+
+test('rete che cade durante il salvataggio: riprova da solo, nessun dato perso né duplicato', async ({ page }) => {
+  const env = await setup(page);
+  await openEvent(page, env);
+  await page.getByRole('button', { name: 'Crea scheda di produzione' }).click();
+  await page.locator('.prod-nav').getByRole('link', { name: /Struttura/ }).click();
+  env.failSalva = 2;
+  await page.getByLabel('Nome del nuovo spazio').fill('Camerino');
+  await page.getByRole('button', { name: 'Aggiungi spazio' }).click();
+  await expect(page.locator('.save-ind')).toHaveText('Rete assente, riprovo…');
+  await page.locator('.lrow.spa').nth(1).getByLabel('Note dello spazio').fill('Secondo piano');
+  await expect(page.locator('.save-ind')).toHaveText(/Salvato alle/, { timeout: 20000 });
+  const rows = env.getSS(env.state.props.DB_ID).getSheetByName('location').rows().filter(r => r[2] === 'Camerino');
+  expect(rows.length).toBe(1);
+  expect(rows[0][4]).toBe('Secondo piano');
+});
+
+test('sola lettura: vede scheda e file, non crea, non modifica, non carica', async ({ page }) => {
+  const env = await setup(page);
+  const adm = tokenFor(env, ADMIN);
+  const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo === 'Convegno Museo Castromediano').id;
+  const p = apiCall(env, adm, 'produzione.crea', { evento_id: evId }).data;
+  apiCall(env, adm, 'produzione.salva', { id: p.id, ops: [
+    { tipo: 'persona', azione: 'crea', id: 'per_letturatest01', campi: { nome: 'Cesare', telefono: '340 000' } },
+    { tipo: 'squadra', azione: 'crea', id: 'sq_letturatest001', campi: { persona_id: 'per_letturatest01', ruolo: 'Direttore di produzione' } }] });
+  apiCall(env, adm, 'allegati.carica', { evento_id: evId, sezione: 'piano', nome: 'piano.pdf', mime: 'application/pdf', dati: Buffer.from('PIANO').toString('base64') });
+  apiCall(env, adm, 'utenti.save', { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'LETTURA' });
   await login(page, env, 'tecnico@example.com');
   await page.getByText('Convegno Museo Castromediano').click();
-  await expect(page.locator('#sec-materiale table')).toContainText('Proiettore');
-  await expect(page.getByRole('button', { name: 'Modifica' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Compila' })).toHaveCount(0);
   await expect(page.getByText('Allega file')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Togli/ })).toHaveCount(0);
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Scarica piano\.pdf/ }).click()]);
   const fs = await import('node:fs');
   expect(fs.readFileSync(await dl.path()).toString()).toBe('PIANO');
-});
-
-test('conflitto: se un altro salva prima, avviso chiaro e nessuna sovrascrittura', async ({ page }) => {
-  const env = await setup(page);
-  await openEvent(page, env);
-  const sec = page.locator('#sec-piano');
-  await sec.getByRole('button', { name: 'Compila' }).click();
-  await sec.locator('#piano-0-attivita').fill('Mia versione');
-  // nel frattempo qualcun altro salva la stessa sezione
-  env.state.cache.clear();
-  env.ctx.handleRequest(JSON.stringify({ action: 'auth.requestCode', payload: { email: ADMIN } }));
-  const code = env.state.mails.at(-1).subject.match(/(\d{6})/)[1];
-  const t2 = env.ctx.handleRequest(JSON.stringify({ action: 'auth.verifyCode', payload: { email: ADMIN, code } })).data.token;
-  const evId = env.ctx.handleRequest(JSON.stringify({ action: 'eventi.list', token: t2 })).data.find(e => e.titolo === 'Cantelmo: Maria Mazzotta').id;
-  env.ctx.handleRequest(JSON.stringify({ action: 'sezioni.righe', token: t2, payload: { evento_id: evId, sezione: 'piano', versione: '0', righe: [{ attivita: 'Versione altrui' }] } }));
-  await sec.getByRole('button', { name: 'Salva' }).click();
-  await expect(sec.getByText(/Qualcun altro ha appena modificato questa sezione/)).toBeVisible();
-  const vivi = env.getSS(env.state.props.DB_ID).getSheetByName('attivita').rows().slice(1).map(r => r[4]);
-  expect(vivi).toEqual(['Versione altrui']);
+  await page.getByRole('link', { name: 'Apri scheda' }).click();
+  await expect(page.getByRole('heading', { name: 'Convegno Museo Castromediano' })).toBeVisible();
+  await expect(page.locator('main.prod input, main.prod select, main.prod textarea')).toHaveCount(0);
+  await page.locator('.prod-nav').getByRole('link', { name: /Persone/ }).click();
+  await expect(page.getByText('Direttore di produzione')).toBeVisible();
+  await expect(page.locator('main.prod input, main.prod select, main.prod textarea')).toHaveCount(0);
 });

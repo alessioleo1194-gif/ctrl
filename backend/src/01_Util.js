@@ -70,7 +70,9 @@ var Util = (function () {
   }
 
   function isDate(s) {
-    return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s + 'T00:00:00Z'));
+    if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    var d = new Date(s + 'T00:00:00Z');
+    return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; // rifiuta date inesistenti come il 30 febbraio
   }
 
   function isTime(s) {

@@ -9,20 +9,13 @@ var Events = (function () {
   var CAL_FIELDS = ['titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo', 'descrizione', 'colore'];
   var COLORE_DEFAULT = '#5b6472';
 
+  /** Per ogni evento: presenza di contenuti in piano, materiale, scheda (oggi: file allegati). */
   function contaSezioni() {
     var out = {};
-    function bump(id, k) {
-      if (!out[id]) out[id] = { piano: 0, materiale: 0, scheda: 0 };
-      out[id][k]++;
-    }
-    Db.all('attivita').forEach(function (r) { if (!Util.bool(r.eliminato)) bump(r.evento_id, 'piano'); });
-    Db.all('materiale').forEach(function (r) { if (!Util.bool(r.eliminato)) bump(r.evento_id, 'materiale'); });
-    Db.all('canali').forEach(function (r) { if (!Util.bool(r.eliminato)) bump(r.evento_id, 'scheda'); });
-    Db.all('testi').forEach(function (r) {
-      if (r.testo && ['piano', 'materiale', 'scheda'].indexOf(r.sezione) >= 0) bump(r.evento_id, r.sezione);
-    });
     Db.all('allegati').forEach(function (r) {
-      if (!Util.bool(r.nel_cestino) && ['piano', 'materiale', 'scheda'].indexOf(r.sezione) >= 0) bump(r.evento_id, r.sezione);
+      if (Util.bool(r.nel_cestino) || Allegati.SEZIONI.indexOf(r.sezione) < 0) return;
+      if (!out[r.evento_id]) out[r.evento_id] = { piano: 0, materiale: 0, scheda: 0 };
+      out[r.evento_id][r.sezione]++;
     });
     return out;
   }
@@ -33,7 +26,7 @@ var Events = (function () {
       id: e.id, origine: e.origine, titolo: e.titolo, data: e.data, data_fine: e.data_fine || e.data,
       ora_inizio: e.ora_inizio, ora_fine: e.ora_fine, luogo: e.luogo, descrizione: e.descrizione,
       colore: e.colore || COLORE_DEFAULT, stato: e.stato, note: e.note, versione: e.versione,
-      aggiornato_il: e.aggiornato_il, aggiornato_da: e.aggiornato_da,
+      aggiornato_il: e.aggiornato_il, aggiornato_da: e.aggiornato_da, produzione_id: e.progetto_id || '',
       stato_doc: { piano: c.piano > 0, materiale: c.materiale > 0, scheda: c.scheda > 0 }
     };
     if (user && Users.can(user, 'admin') && e.cartella_id) v.cartella_url = 'https://drive.google.com/drive/folders/' + e.cartella_id;
@@ -57,7 +50,8 @@ var Events = (function () {
     var e = Db.find('eventi', 'id', p && p.id);
     if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
     var out = view(e, contaSezioni(), user);
-    out.sezioni = Sezioni.tutte(e.id);
+    out.allegati = Allegati.perEvento(e.id);
+    out.produzione = e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;
     if (Users.can(user, 'admin')) out.storico = Storico.forEvent(e.id, 30);
     return out;
   }
@@ -109,7 +103,7 @@ var Events = (function () {
       f.versione = '1';
       var row = Db.insert('eventi', f);
       Storico.log(user.email, row.id, 'evento', 'crea', row.id, '', { titolo: row.titolo, data: row.data });
-      return view(row, {}, user);
+      return get(user, { id: row.id });
     });
   }
 

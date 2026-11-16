@@ -3,9 +3,9 @@ import { h, icon, toast, loading } from '../ui.js';
 import { store, navigate, upsertEvent } from '../app.js';
 import { dateRange, timeRange, stamp } from '../format.js';
 import { openEventForm } from './eventForm.js';
-import { sectionCard, ORDINE } from './sections.js';
+import { allegatiCard } from './allegati.js';
 
-/** Dettaglio evento: informazioni, piano, materiale, scheda tecnica, note. */
+/** Dettaglio evento: informazioni, scheda di produzione, file allegati, note. */
 export async function renderEvent(pane, id) {
   pane.replaceChildren(loading('Apertura evento…'));
   let ev;
@@ -50,7 +50,8 @@ function draw(pane, ev) {
 
   const notes = notesCard(ev, p, (upd) => draw(pane, upd));
 
-  const sezioni = ORDINE.map(k => sectionCard(ev, k));
+  const produzione = produzioneCard(ev, p);
+  const allegati = allegatiCard(ev);
 
   const admin = p.admin ? adminCard(ev, pane) : null;
   const histo = p.admin && ev.storico?.length ? h('section', { class: 'card' },
@@ -59,7 +60,43 @@ function draw(pane, ev) {
       h('span', { class: 'mono help' }, stamp(s.ts)),
       h('span', {}, h('b', {}, s.email === 'calendar' ? 'Calendar' : s.email), ' · ', s.azione, s.dopo ? h('span', { class: 'help' }, ' ' + s.dopo.slice(0, 140)) : null))))) : null;
 
-  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, ...sezioni, notes, admin, histo));
+  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, produzione, allegati, notes, admin, histo));
+}
+
+const STATO_TESTO = { vuoto: 'da compilare', in_corso: 'da completare', completo: 'completo' };
+
+/** Riquadro della scheda di produzione: riepilogo e accesso, oppure creazione. */
+function produzioneCard(ev, p) {
+  const pr = ev.produzione;
+  if (!pr) {
+    const status = h('div', { class: 'status-line' });
+    const crea = p.modificare ? h('button', { class: 'btn primary', onclick: async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true; b.textContent = 'Creazione…';
+      try {
+        const nuova = await api('produzione.crea', { evento_id: ev.id });
+        const x = store.events?.find(y => y.id === ev.id); if (x) x.produzione_id = nuova.id;
+        navigate('#/p/' + nuova.id);
+      } catch (err) { status.className = 'status-line err'; status.textContent = err.message; b.disabled = false; b.textContent = 'Crea scheda di produzione'; }
+    } }, icon('plus'), 'Crea scheda di produzione') : null;
+    return h('section', { class: 'card prod-card' },
+      h('header', {}, h('span', { class: 'label' }, 'Scheda di produzione')),
+      h('div', { class: 'in', style: { display: 'grid', gap: '10px' } },
+        h('p', { class: 'help', style: { margin: 0 } }, p.modificare
+          ? 'Giornate, spazi e squadra in un unico posto. Si parte dalle date e dal luogo di questo evento.'
+          : 'Nessuna scheda di produzione per questo evento.'),
+        crea ? h('div', { class: 'row' }, crea) : null, status));
+  }
+  const b = pr.blocchi;
+  const riga = (nome, testo, st) => h('div', { class: 'prod-sum-row' }, h('span', { class: 'dot ' + st, 'aria-hidden': 'true' }), h('b', {}, nome), h('span', { class: 'help' }, testo + ' · ' + STATO_TESTO[st]));
+  return h('section', { class: 'card prod-card' },
+    h('header', {}, h('span', { class: 'label' }, pr.tipo === 'festival' ? 'Scheda di produzione · festival' : 'Scheda di produzione'),
+      h('a', { class: 'btn primary', href: '#/p/' + pr.id }, 'Apri scheda')),
+    h('div', { class: 'in', style: { display: 'grid', gap: '6px' } },
+      pr.tipo === 'festival' ? h('p', { style: { margin: '0 0 4px' } }, h('b', {}, pr.nome), h('span', { class: 'help' }, ` · ${pr.eventi} eventi`)) : null,
+      riga('Struttura', `${b.struttura.giornate} ${b.struttura.giornate === 1 ? 'giornata' : 'giornate'}, ${b.struttura.spazi} ${b.struttura.spazi === 1 ? 'spazio' : 'spazi'}`, b.struttura.stato),
+      riga('Persone', `${b.persone.squadra} in squadra`, b.persone.stato),
+      pr.avvisi ? h('a', { class: 'help', href: '#/p/' + pr.id }, pr.avvisi === 1 ? '1 avviso da controllare' : pr.avvisi + ' avvisi da controllare') : null));
 }
 
 function notesCard(ev, p, redraw) {
