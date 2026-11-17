@@ -40,6 +40,7 @@ async function setup(page, { calendarEvents = calendar() } = {}) {
     const body = route.request().postData();
     const azione = JSON.parse(body).action;
     if (env.failSalva > 0 && azione === 'documento.salva') { env.failSalva--; return route.abort('internetdisconnected'); }
+    if (env.failPdf && azione === 'documento.pdf') return route.abort('internetdisconnected');
     if (env.primaDelSalvataggio && azione === 'documento.salva') { const f = env.primaDelSalvataggio; env.primaDelSalvataggio = null; f(); }
     const out = JSON.parse(JSON.stringify(env.ctx.handleRequest(body)));
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
@@ -257,7 +258,7 @@ const incolla = (page, label, tsv) => page.getByLabel(label, { exact: true }).ev
   const dt = new DataTransfer(); dt.setData('text/plain', t); el.focus();
   el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
 }, tsv);
-const salvato = (page) => expect(page.locator('.save-ind')).toHaveText(/Salvato alle|Tutto salvato/, { timeout: 15000 });
+const salvato = (page) => expect(page.locator('.save-ind')).toHaveText(/Salvato alle|Tutto salvato|PDF aggiornato/, { timeout: 15000 });
 const righeDoc = (env, tipo) => {
   const ss = env.getSS(env.state.props.DB_ID);
   const doc = ss.getSheetByName('documenti').rows().slice(1).filter(r => r[2] === tipo).pop();   // l'ultimo creato
@@ -618,4 +619,53 @@ test('tablet: i fogli stanno nello schermo in verticale e in orizzontale, azioni
   await expect(page.getByRole('heading', { name: 'Material List' })).toBeVisible();
   await noHorizontalScroll(page);
   await page.screenshot({ path: `test-results/tablet-materiali-${info.project.name}.png` });
+});
+
+test('Save Changes: salva il documento e archivia il PDF come file dell\'evento; l\'icona dell\'elenco si accende; salvare di nuovo sostituisce il PDF', async ({ page }, info) => {
+  const env = await setup(page);
+  await apriMateriali(page, env);
+  await page.getByLabel('Location · Item · riga 1').click();
+  await page.keyboard.type('Mixing Console'); await page.keyboard.press('Tab'); await page.keyboard.type('2');
+  // il salvataggio automatico salva il documento ma non il PDF: lo dice
+  await expect(page.locator('.save-ind')).toHaveText(/Salvato alle .* PDF da aggiornare/, { timeout: 15000 });
+  const adm = tokenFor(env, ADMIN);
+  const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo.startsWith('Convegno') || e.titolo.startsWith('Cantelmo')).id;
+  expect(apiCall(env, adm, 'eventi.get', { id: evId }).data.allegati.materiale).toHaveLength(0);
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.locator('.save-ind')).toHaveText("Salvato · PDF aggiornato nell'evento", { timeout: 20000 });
+  const mat = apiCall(env, adm, 'eventi.get', { id: evId }).data.allegati.materiale;
+  expect(mat).toHaveLength(1);
+  expect(mat[0].nome).toMatch(/^Material List - Cantelmo Maria Mazzotta - \d{4}-\d{2}-\d{2}\.pdf$/);
+  const file = [...env.state.drive.files.values()].find(f => f.name === mat[0].nome && !f.trashed);
+  expect(Buffer.from(file.bytes.map(b => (b + 256) % 256)).subarray(0, 5).toString()).toBe('%PDF-');
+  await page.screenshot({ path: `test-results/pdf-salvato-${info.project.name}.png` });
+  // l'icona del materiale si accende nell'elenco eventi (senza ricaricare)
+  await page.getByRole('link', { name: 'Event', exact: true }).click();
+  await page.getByRole('link', { name: 'CTRL, torna agli eventi' }).click();
+  if (info.project.name === 'desktop') await expect(page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).locator('.ind .materiale.on')).toHaveCount(1);
+  // seconda volta: sostituisce, non accumula
+  await page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).first().click();
+  await page.getByRole('button', { name: /Material List/ }).or(page.getByRole('link', { name: /Material List/ })).first().click();
+  await expect(page.getByRole('heading', { name: 'Material List' })).toBeVisible();
+  await page.getByLabel('Location · Item · riga 2').click();
+  await page.keyboard.type('DI Box');
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.locator('.save-ind')).toHaveText("Salvato · PDF aggiornato nell'evento", { timeout: 20000 });
+  const mat2 = apiCall(env, adm, 'eventi.get', { id: evId }).data.allegati.materiale;
+  expect(mat2).toHaveLength(1);
+  expect([...env.state.drive.files.values()].filter(f => f.name === mat[0].nome && f.trashed)).toHaveLength(1);
+});
+
+test('Save Changes: se il PDF non si crea il documento resta salvato e lo dice', async ({ page }) => {
+  const env = await setup(page);
+  await apriMateriali(page, env);
+  await page.getByLabel('Location · Item · riga 1').click();
+  await page.keyboard.type('Cavo XLR');
+  env.failPdf = true;
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.locator('.save-ind')).toHaveText(/Documento salvato, PDF non aggiornato/, { timeout: 20000 });
+  expect(righeDoc(env, 'materiali').sezioni[0].righe[0].voce).toBe('Cavo XLR');
+  env.failPdf = false;
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.locator('.save-ind')).toHaveText("Salvato · PDF aggiornato nell'evento", { timeout: 20000 });
 });

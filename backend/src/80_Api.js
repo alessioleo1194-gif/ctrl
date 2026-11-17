@@ -26,6 +26,7 @@ var ACTIONS = {
   'produzione.scollega': { fn: function (u, p) { return Produzioni.scollega(u, p); } },
   'documento.get': { fn: function (u, p) { return Documenti.get(u, p); } },
   'documento.salva': { fn: function (u, p) { return Documenti.salva(u, p); } },
+  'documento.pdf': { fn: function (u, p) { return Documenti.salvaPdf(u, p); } },
 
   'sync.run': { fn: function (u) { Users.require(u, 'impostazioni'); return CalendarSync.run(u.email); } },
 

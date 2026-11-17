@@ -194,3 +194,74 @@ test('storico: il salvataggio di un documento è registrato con chi e quando', (
   assert.equal(st.length, 1);
   assert.equal(st[0][1], ADMIN);
 });
+
+// ---------- PDF archiviato come file dell'evento ----------
+const PDF_B64 = (testo = 'uno') => Buffer.from('%PDF-1.4\n' + testo).toString('base64');
+const salvaPdf = (env, pid, tipo, nome, dati = PDF_B64(), token = env.token) => call(env.ctx, 'documento.pdf', { produzione_id: pid, tipo, nome, dati }, token);
+const NOME_P = (d = '2026-11-20') => `Production Plan - Cantelmo - ${d}.pdf`;
+
+test('PDF: viene salvato come file dell\'evento, accende l\'indicatore e si scarica identico', () => {
+  const env = boot();
+  const p = assicura(env);
+  const prima = ok(call(env.ctx, 'eventi.list', {}, env.token)).find(e => e.id === env.ev('Cantelmo').id);
+  assert.deepEqual(prima.stato_doc, { piano: false, materiale: false, scheda: false });
+  ok(salvaDoc(env, p.id, 'plan', '0', PLAN()));
+  ok(salvaPdf(env, p.id, 'plan', NOME_P()));
+  const dopo = ok(call(env.ctx, 'eventi.list', {}, env.token)).find(e => e.id === env.ev('Cantelmo').id);
+  assert.deepEqual(dopo.stato_doc, { piano: true, materiale: false, scheda: false });
+  const ev = ok(call(env.ctx, 'eventi.get', { id: env.ev('Cantelmo').id }, env.token));
+  assert.equal(ev.allegati.piano.length, 1);
+  assert.equal(ev.allegati.piano[0].nome, NOME_P());
+  const f = ok(call(env.ctx, 'allegati.scarica', { id: ev.allegati.piano[0].id }, env.token));
+  assert.equal(Buffer.from(f.dati, 'base64').toString(), '%PDF-1.4\nuno');
+  // il Material List va nella sezione materiale
+  ok(salvaPdf(env, p.id, 'materiali', 'Material List - Cantelmo - 2026-11-20.pdf'));
+  const ev2 = ok(call(env.ctx, 'eventi.get', { id: env.ev('Cantelmo').id }, env.token));
+  assert.equal(ev2.allegati.materiale.length, 1);
+});
+
+test('PDF: un nuovo salvataggio sostituisce il precedente (uno solo visibile), il vecchio va nel cestino di Drive; altri file restano', () => {
+  const env = boot();
+  const p = assicura(env);
+  const eid = env.ev('Cantelmo').id;
+  ok(call(env.ctx, 'allegati.carica', { evento_id: eid, sezione: 'piano', nome: 'rider-band.pdf', mime: 'application/pdf', dati: PDF_B64('rider') }, env.token));
+  ok(salvaPdf(env, p.id, 'plan', NOME_P(), PDF_B64('v1')));
+  ok(salvaPdf(env, p.id, 'plan', NOME_P(), PDF_B64('v2')));
+  const ev = ok(call(env.ctx, 'eventi.get', { id: eid }, env.token));
+  assert.deepEqual(ev.allegati.piano.map(a => a.nome).sort(), [NOME_P(), 'rider-band.pdf']);
+  const mio = ev.allegati.piano.find(a => a.nome === NOME_P());
+  assert.equal(Buffer.from(ok(call(env.ctx, 'allegati.scarica', { id: mio.id }, env.token)).dati, 'base64').toString(), '%PDF-1.4\nv2');
+  const files = [...env.state.drive.files.values()].filter(f => f.name === NOME_P());
+  assert.equal(files.length, 2);
+  assert.equal(files.filter(f => f.trashed).length, 1);
+  assert.equal(rows(env, 'storico').filter(r => r[3] === 'piano' && r[4] === 'allegato_sostituito').length, 1);
+});
+
+test('PDF: festival, il file va in tutti gli eventi collegati', () => {
+  const env = boot();
+  const p = assicura(env, 'Festival · giorno 1');
+  ok(call(env.ctx, 'produzione.collega', { id: p.id, evento_id: env.ev('Festival · giorno 3').id }, env.token));
+  const r = ok(salvaPdf(env, p.id, 'plan', 'Production Plan - Festival - 2026-11-27.pdf'));
+  assert.equal(r.eventi.length, 2);
+  for (const t of ['Festival · giorno 1', 'Festival · giorno 3']) {
+    const l = ok(call(env.ctx, 'eventi.list', {}, env.token)).find(e => e.id === env.ev(t).id);
+    assert.equal(l.stato_doc.piano, true, t);
+  }
+});
+
+test('PDF: rifiuta nome sbagliato, file non PDF, tipo/produzione inesistenti e chi non può modificare; Drive in errore non lascia righe', () => {
+  const env = boot();
+  const p = assicura(env);
+  assert.equal(salvaPdf(env, p.id, 'plan', 'Material List - x.pdf').error.code, 'INVALID');
+  assert.equal(salvaPdf(env, p.id, 'plan', '../Production Plan - x.pdf').error.code, 'INVALID');
+  assert.equal(salvaPdf(env, p.id, 'plan', NOME_P(), Buffer.from('MZ non pdf').toString('base64')).error.code, 'INVALID');
+  assert.equal(salvaPdf(env, p.id, 'plan', NOME_P(), '').error.code, 'INVALID');
+  assert.equal(salvaPdf(env, p.id, 'boh', NOME_P()).error.code, 'INVALID');
+  assert.equal(salvaPdf(env, 'prj_inesistente', 'plan', NOME_P()).error.code, 'NOT_FOUND');
+  const lett = utente(env, 'lettore@example.com', 'LETTURA');
+  assert.equal(salvaPdf(env, p.id, 'plan', NOME_P(), PDF_B64(), lett).error.code, 'FORBIDDEN');
+  env.state.driveFail = true;
+  assert.equal(salvaPdf(env, p.id, 'plan', NOME_P()).ok, false);
+  env.state.driveFail = false;
+  assert.equal(rows(env, 'allegati').length, 1); // solo l'intestazione: nessun allegato registrato
+});

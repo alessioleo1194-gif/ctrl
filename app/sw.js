@@ -2,7 +2,7 @@
  * Rende l'app installabile e veloce ad aprirsi. Non salva MAI le risposte dell'API:
  * i dati arrivano sempre aggiornati dal server.
  */
-const VERSION = 'ctrl-0.5.1';
+const VERSION = 'ctrl-0.6.0';
 const SHELL = [
   '/', '/index.html', '/css/ctrl.css', '/manifest.webmanifest', '/icons/icon.svg',
   '/js/app.js', '/js/api.js', '/js/config.js', '/js/ui.js', '/js/format.js',

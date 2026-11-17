@@ -34,7 +34,7 @@ const LINEA = [60, 66, 76];
 const AZZURRO = [221, 229, 241];
 
 /** Crea il PDF di un documento (plan o materiali) e lo scarica. Restituisce il documento jsPDF (usato dai test). */
-export async function creaPdf(d, nome) {
+export async function creaPdf(d, nome, opz = {}) {
   const jsPDF = await carica();
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   pdf.setProperties({ title: testoPdf(d.titolo + ' · ' + d.nomeEvento), creator: 'CTRL' });
@@ -115,6 +115,15 @@ export async function creaPdf(d, nome) {
     pdf.text(testoPdf(d.aggiornato), M, H - 8);
     pdf.text(testoPdf(`${d.T.pagina} ${i} ${d.T.di} ${n}`), W - M, H - 8, { align: 'right' });
   }
-  pdf.save(nome);
+  if (opz.scarica !== false) pdf.save(nome);
   return pdf;
+}
+
+/** PDF del documento come base64 (per archiviarlo sul server), senza scaricarlo. */
+export async function pdfBase64(d) {
+  const pdf = await creaPdf(d, '', { scarica: false });
+  const b = new Uint8Array(pdf.output('arraybuffer'));
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
 }

@@ -107,5 +107,29 @@ var Allegati = (function () {
     });
   }
 
-  return { SEZIONI: SEZIONI, MAX_BYTE: MAX_BYTE, perEvento: perEvento, carica: carica, scarica: scarica, elimina: elimina };
+  /**
+   * PDF generato da CTRL (Production Plan / Material List): sostituisce quello precedente dello stesso tipo
+   * nella sezione dell'evento. Il vecchio finisce nel cestino di Drive (recuperabile 30 giorni).
+   * Da chiamare dentro Db.withLock.
+   */
+  function sostituisciPdf(user, e, sez, prefisso, nome, bytes) {
+    sezione(sez);
+    Db.all('allegati').forEach(function (r) {
+      if (r.evento_id !== e.id || r.sezione !== sez || Util.bool(r.nel_cestino)) return;
+      if (r.mime !== 'application/pdf' || String(r.nome).indexOf(prefisso) !== 0) return;
+      try { DriveApp.getFileById(r.drive_id).setTrashed(true); } catch (err) { /* già rimosso da Drive */ }
+      Db.update('allegati', 'id', r.id, { nel_cestino: 'TRUE' });
+      Storico.log(user.email, e.id, sez, 'allegato_sostituito', r.id, r.nome, nome);
+    });
+    var file = cartella(e).createFile(Utilities.newBlob(bytes, 'application/pdf', nome));
+    var row = Db.insert('allegati', {
+      id: Util.newId('al'), evento_id: e.id, sezione: sez, drive_id: file.getId(), nome: nome, mime: 'application/pdf',
+      byte: String(bytes.length), caricato_da: user.email, caricato_il: Util.nowIso(), nel_cestino: 'FALSE'
+    });
+    Storico.log(user.email, e.id, sez, 'allegato', row.id, '', nome);
+    return row;
+  }
+
+  return { SEZIONI: SEZIONI, MAX_BYTE: MAX_BYTE, perEvento: perEvento, carica: carica, scarica: scarica, elimina: elimina,
+    sostituisciPdf: sostituisciPdf };
 })();

@@ -1,5 +1,15 @@
 # Registro delle modifiche
 
+## 0.6.0 · PDF archiviato al salvataggio (17/11/2026)
+
+- **Save Changes** su Production Plan e Material List salva il documento e genera il PDF, archiviato come file dell'evento
+  (sezione piano o materiale, cartella Drive dell'evento). L'icona dell'evento si accende.
+- Un solo PDF per documento: il salvataggio successivo lo sostituisce, il vecchio va nel cestino di Drive (30 giorni).
+- Dopo il salvataggio automatico la barra dice "PDF da aggiornare (Save Changes)"; se il PDF non si crea il documento
+  resta salvato e il messaggio lo spiega.
+- Festival: il PDF compare in tutti gli eventi collegati.
+- Backend: nuova azione `documento.pdf`, nessuna nuova tabella (serve solo aggiornare il codice Apps Script, non il setup).
+
 ## 0.5.1 · Material List senza colonna Unit (17/11/2026)
 
 - Tolta la colonna **Unit** dalla Material List (foglio, PDF, Copy Text, incolla da Excel: Item · Quantity · Notes).

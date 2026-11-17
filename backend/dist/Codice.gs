@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.5.0
+ * CTRL API · versione 0.6.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.5.0';
+var CTRL_VERSION = '0.6.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -1115,7 +1115,31 @@ var Allegati = (function () {
     });
   }
 
-  return { SEZIONI: SEZIONI, MAX_BYTE: MAX_BYTE, perEvento: perEvento, carica: carica, scarica: scarica, elimina: elimina };
+  /**
+   * PDF generato da CTRL (Production Plan / Material List): sostituisce quello precedente dello stesso tipo
+   * nella sezione dell'evento. Il vecchio finisce nel cestino di Drive (recuperabile 30 giorni).
+   * Da chiamare dentro Db.withLock.
+   */
+  function sostituisciPdf(user, e, sez, prefisso, nome, bytes) {
+    sezione(sez);
+    Db.all('allegati').forEach(function (r) {
+      if (r.evento_id !== e.id || r.sezione !== sez || Util.bool(r.nel_cestino)) return;
+      if (r.mime !== 'application/pdf' || String(r.nome).indexOf(prefisso) !== 0) return;
+      try { DriveApp.getFileById(r.drive_id).setTrashed(true); } catch (err) { /* già rimosso da Drive */ }
+      Db.update('allegati', 'id', r.id, { nel_cestino: 'TRUE' });
+      Storico.log(user.email, e.id, sez, 'allegato_sostituito', r.id, r.nome, nome);
+    });
+    var file = cartella(e).createFile(Utilities.newBlob(bytes, 'application/pdf', nome));
+    var row = Db.insert('allegati', {
+      id: Util.newId('al'), evento_id: e.id, sezione: sez, drive_id: file.getId(), nome: nome, mime: 'application/pdf',
+      byte: String(bytes.length), caricato_da: user.email, caricato_il: Util.nowIso(), nel_cestino: 'FALSE'
+    });
+    Storico.log(user.email, e.id, sez, 'allegato', row.id, '', nome);
+    return row;
+  }
+
+  return { SEZIONI: SEZIONI, MAX_BYTE: MAX_BYTE, perEvento: perEvento, carica: carica, scarica: scarica, elimina: elimina,
+    sostituisciPdf: sostituisciPdf };
 })();
 
 // ===== 23_Produzioni.js =====
@@ -1387,7 +1411,34 @@ var Documenti = (function () {
     });
   }
 
-  return { TIPI: TIPI, CATALOGO_ATTIVITA: CATALOGO_ATTIVITA, get: get, salva: salva, pulisci: pulisci, riepilogo: function (pid) {
+  var PDF = { plan: { sezione: 'piano', prefisso: 'Production Plan - ' }, materiali: { sezione: 'materiale', prefisso: 'Material List - ' } };
+
+  /**
+   * Archivia il PDF generato dal browser come file dell'evento (sezione piano o materiale).
+   * Per i festival il PDF va in tutti gli eventi collegati, come il documento.
+   */
+  function salvaPdf(user, p) {
+    Users.require(user, 'modificare');
+    p = p || {};
+    var tipo = tipoValido(p.tipo);
+    var pr = produzione(p.produzione_id);
+    var conf = PDF[tipo];
+    var nome = Util.text(p.nome, 150).replace(/[\\/]+/g, '-');
+    if (nome.indexOf(conf.prefisso) !== 0 || !/\.pdf$/i.test(nome)) throw new CtrlError('INVALID', 'Nome del PDF non valido');
+    if (typeof p.dati !== 'string' || !p.dati) throw new CtrlError('INVALID', 'PDF vuoto');
+    if (p.dati.length > Math.ceil(Allegati.MAX_BYTE / 3) * 4 + 4) throw new CtrlError('TOO_LARGE', 'PDF troppo grande');
+    var bytes;
+    try { bytes = Utilities.base64Decode(p.dati); } catch (err) { throw new CtrlError('INVALID', 'PDF non leggibile'); }
+    if (bytes.length < 5 || bytes[0] !== 37 || bytes[1] !== 80 || bytes[2] !== 68 || bytes[3] !== 70) throw new CtrlError('INVALID', 'Il file non è un PDF');
+    return Db.withLock(function () {
+      var eventi = Db.all('eventi').filter(function (e) { return e.progetto_id === pr.id; });
+      if (!eventi.length) throw new CtrlError('NOT_FOUND', 'Nessun evento collegato alla scheda');
+      eventi.forEach(function (e) { Allegati.sostituisciPdf(user, e, conf.sezione, conf.prefisso, nome, bytes); });
+      return { eventi: eventi.map(function (e) { return e.id; }), sezione: conf.sezione, nome: nome };
+    });
+  }
+
+  return { TIPI: TIPI, CATALOGO_ATTIVITA: CATALOGO_ATTIVITA, get: get, salva: salva, salvaPdf: salvaPdf, pulisci: pulisci, riepilogo: function (pid) {
     var r = {};
     TIPI.forEach(function (tp) { var d = trovaDoc(pid, tp); r[tp] = d ? { versione: d.versione, aggiornato_il: d.aggiornato_il } : null; });
     return r;
@@ -1423,6 +1474,7 @@ var ACTIONS = {
   'produzione.scollega': { fn: function (u, p) { return Produzioni.scollega(u, p); } },
   'documento.get': { fn: function (u, p) { return Documenti.get(u, p); } },
   'documento.salva': { fn: function (u, p) { return Documenti.salva(u, p); } },
+  'documento.pdf': { fn: function (u, p) { return Documenti.salvaPdf(u, p); } },
 
   'sync.run': { fn: function (u) { Users.require(u, 'impostazioni'); return CalendarSync.run(u.email); } },
 
