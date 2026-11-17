@@ -21,13 +21,11 @@ var ACTIONS = {
   'allegati.scarica': { fn: function (u, p) { return Allegati.scarica(u, p); } },
   'allegati.elimina': { fn: function (u, p) { return Allegati.elimina(u, p); } },
 
-  'produzione.get': { fn: function (u, p) { return Produzioni.get(u, p); } },
-  'produzione.crea': { fn: function (u, p) { return Produzioni.crea(u, p); } },
+  'produzione.assicura': { fn: function (u, p) { return Produzioni.assicura(u, p); } },
   'produzione.collega': { fn: function (u, p) { return Produzioni.collega(u, p); } },
   'produzione.scollega': { fn: function (u, p) { return Produzioni.scollega(u, p); } },
-  'produzione.salva': { fn: function (u, p) { return Produzioni.salva(u, p); } },
-  'persone.list': { fn: function (u) { return Produzioni.rubrica(u); } },
-  'persone.elimina': { fn: function (u, p) { return Produzioni.eliminaPersona(u, p); } },
+  'documento.get': { fn: function (u, p) { return Documenti.get(u, p); } },
+  'documento.salva': { fn: function (u, p) { return Documenti.salva(u, p); } },
 
   'sync.run': { fn: function (u) { Users.require(u, 'impostazioni'); return CalendarSync.run(u.email); } },
 

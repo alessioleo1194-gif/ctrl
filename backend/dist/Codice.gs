@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.4.0
+ * CTRL API · versione 0.5.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.4.0';
+var CTRL_VERSION = '0.5.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -179,7 +179,7 @@ var Util = (function () {
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 3;
+var SCHEMA_VERSION = 4;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -208,6 +208,9 @@ var SCHEMA = {
     'aggiornato_il', 'aggiornato_da', 'versione'],
   squadra: ['id', 'progetto_id', 'persona_id', 'ruolo', 'giornata_id', 'spazio_id', 'note', 'ordine', 'eliminato',
     'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione'],
+  // documenti operativi di una produzione (Production Plan, Material List): JSON spezzato in parti
+  documenti: ['id', 'progetto_id', 'tipo', 'versione', 'parti', 'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'eliminato'],
+  documenti_parti: ['id', 'documento_id', 'n', 'testo'],
   utenti: ['id', 'email', 'nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo', 'creato_il',
     'aggiornato_il', 'versione', 'ultimo_accesso'],
   sessioni: ['hash', 'email', 'creata', 'scade', 'ultimo_uso', 'dispositivo'],
@@ -1117,535 +1120,278 @@ var Allegati = (function () {
 
 // ===== 23_Produzioni.js =====
 /**
- * CTRL · Scheda di produzione (struttura, persone, programma).
+ * CTRL · Produzione = contenitore dei documenti operativi (Production Plan e Material List).
  *
- * Una produzione (tabella "progetti") raggruppa uno o più eventi del Calendar
- * (eventi.progetto_id): un concerto ha un evento, un festival ne ha molti.
- * Contiene giornate, spazi (tabella "location") e la squadra, che punta alla
- * rubrica comune "persone".
- *
- * Salvataggio: l'app manda lotti di operazioni (produzione.salva) con id generati
- * da lei, così un nuovo elemento si può modificare subito e un invio ripetuto dopo
- * un errore di rete non crea doppioni. Il lotto si valida tutto prima di scrivere:
- * o passa intero o non scrive nulla. Sullo stesso campo vince l'ultimo salvataggio,
- * ma la risposta segnala chi aveva modificato l'elemento nel frattempo.
+ * Una produzione (tabella "progetti") raggruppa uno o più eventi del Calendar (eventi.progetto_id):
+ * un concerto ha un evento, un festival ne ha molti che condividono gli stessi documenti.
+ * Si crea da sola la prima volta che si apre un documento (assicura).
  */
 var Produzioni = (function () {
-  var MAX_OPS = 200;
-  var MAX_GIORNATE_AUTO = 31;
-  var TIPI_SPAZIO = ['palco', 'sala', 'venue', 'magazzino', 'altro'];
-  var MAX_ATTIVITA = 400; // per produzione
-  var PREFISSI = { giornata: 'gio', spazio: 'spa', squadra: 'sq', persona: 'per', attivita: 'att' };
-  var TABELLE = { giornata: 'giornate', spazio: 'location', squadra: 'squadra', persona: 'persone', attivita: 'attivita' };
-  var FIGLI = ['giornata', 'spazio', 'squadra', 'attivita'];
-
-  // Campi modificabili e loro lunghezza massima
-  var CAMPI = {
-    produzione: { nome: 120, note: 5000 },
-    giornata: { data: 10, etichetta: 60, ordine: 6, note: 2000 },
-    spazio: { nome: 80, tipo: 20, indirizzo: 200, note: 1000, ordine: 6 },
-    squadra: { persona_id: 40, ruolo: 80, giornata_id: 40, spazio_id: 40, note: 500, ordine: 6 },
-    persona: { nome: 80, ruolo: 80, telefono: 30, email: 120, azienda: 80, note: 500 },
-    attivita: { giornata_id: 40, ora_inizio: 5, ora_fine: 5, tipo: 20, attivita: 80, spazio_id: 40, responsabile: 120, note: 2000, ordine: 6 }
-  };
-  var CAMPI_ATTIVITA = ['giornata_id', 'ora_inizio', 'ora_fine', 'tipo', 'attivita', 'spazio_id', 'responsabile', 'note', 'ordine'];
-
   function vivo(r) { return r && !Util.bool(r.eliminato); }
-
-  function trova(tabella, id) {
-    var r = Db.find(tabella, 'id', id);
+  function trova(id) {
+    var r = Db.find('progetti', 'id', String(id || ''));
     return vivo(r) ? r : null;
   }
-
-  function produzione(id) {
-    var p = trova('progetti', id);
-    if (!p) throw new CtrlError('NOT_FOUND', 'Scheda di produzione non trovata');
-    return p;
+  function evento(id) {
+    var e = Db.find('eventi', 'id', String(id || ''));
+    if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
+    return e;
+  }
+  function eventiDi(pid) {
+    return Db.all('eventi').filter(function (e) { return e.progetto_id === pid; })
+      .sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); });
   }
 
-  function giorniEvento(e) {
-    var out = [], d = e.data, fine = e.data_fine || e.data;
-    while (d <= fine && out.length < MAX_GIORNATE_AUTO) { out.push(d); d = Util.addDays(d, 1); }
-    return out;
-  }
-
-  function figli(tabella, pid) {
-    return Db.all(tabella).filter(function (r) { return r.progetto_id === pid && vivo(r); });
-  }
-
-  function perOrdine(a, b) { return (parseInt(a.ordine, 10) || 0) - (parseInt(b.ordine, 10) || 0); }
-
-  function pubblica(r, campi) {
-    var o = { id: r.id, versione: r.versione || '1' };
-    campi.forEach(function (c) { o[c] = r[c] || ''; });
-    return o;
-  }
-
-  function personaVista(r) {
-    if (!r) return null;
-    var o = pubblica(r, ['nome', 'ruolo', 'telefono', 'email', 'azienda', 'note']);
-    o.eliminata = Util.bool(r.eliminato);
-    return o;
-  }
-
-  /** Stato dei blocchi e avvisi: informano, non bloccano mai il salvataggio. */
-  function analisi(eventi, giornate, spazi, squadra, persone, attivita) {
-    var avvisi = [];
-    attivita = attivita || [];
-    var date = {};
-    giornate.forEach(function (g) { date[g.data] = true; });
-    eventi.forEach(function (e) {
-      if (e.stato === 'annullato') avvisi.push({ blocco: 'struttura', testo: '"' + e.titolo + '" risulta annullato nel Calendar' });
-      var mancanti = giorniEvento(e).filter(function (d) { return !date[d]; });
-      if (mancanti.length) {
-        avvisi.push({ blocco: 'struttura', testo: '"' + e.titolo + '" ha ' + (mancanti.length === 1 ? 'una data' : mancanti.length + ' date') + ' senza giornata: ' + mancanti.join(', ') });
-      }
-    });
-    if (!giornate.length) avvisi.push({ blocco: 'struttura', testo: 'Nessuna giornata' });
-    if (!spazi.length) avvisi.push({ blocco: 'struttura', testo: 'Nessuno spazio' });
-    if (!squadra.length) avvisi.push({ blocco: 'persone', testo: 'Squadra vuota' });
-    squadra.forEach(function (s) {
-      var p = persone[s.persona_id];
-      if (!p) return;
-      if (Util.bool(p.eliminato)) avvisi.push({ blocco: 'persone', testo: p.nome + ' è stato tolto dalla rubrica' });
-      else if (!p.telefono) avvisi.push({ blocco: 'persone', testo: p.nome + ': manca il telefono' });
-    });
-    Programma.avvisi(giornate, attivita).forEach(function (a) { avvisi.push({ blocco: 'programma', testo: a.testo, id: a.id }); });
-    function stato(n, blocco) {
-      if (!n) return 'vuoto';
-      return avvisi.some(function (a) { return a.blocco === blocco; }) ? 'in_corso' : 'completo';
-    }
-    return {
-      avvisi: avvisi,
-      blocchi: {
-        struttura: { stato: giornate.length && spazi.length ? stato(1, 'struttura') : (giornate.length || spazi.length ? 'in_corso' : 'vuoto'), giornate: giornate.length, spazi: spazi.length },
-        persone: { stato: stato(squadra.length, 'persone'), squadra: squadra.length },
-        programma: { stato: stato(attivita.length, 'programma'), attivita: attivita.length,
-          giornate: giornate.filter(function (g) { return attivita.some(function (a) { return a.giornata_id === g.id; }); }).length }
-      }
-    };
-  }
-
-  function dati(pid) {
-    var p = produzione(pid);
-    var eventi = Db.all('eventi').filter(function (e) { return e.progetto_id === pid && e.stato !== 'archiviato'; })
-      .sort(function (a, b) { return (a.data + a.ora_inizio) < (b.data + b.ora_inizio) ? -1 : 1; });
-    var giornate = figli('giornate', pid).sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : perOrdine(a, b); });
-    var spazi = figli('location', pid).sort(perOrdine);
-    var squadra = figli('squadra', pid).sort(perOrdine);
-    var persone = {};
-    Db.all('persone').forEach(function (r) { persone[r.id] = r; });
-    var gioVive = {};
-    giornate.forEach(function (g) { gioVive[g.id] = true; });
-    var attivita = Programma.ordina(figli('attivita', pid).filter(function (a) { return gioVive[a.giornata_id]; }));
-    return { p: p, eventi: eventi, giornate: giornate, spazi: spazi, squadra: squadra, persone: persone, attivita: attivita };
-  }
-
-  function vista(user, pid, extra) {
-    var d = dati(pid);
-    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone, d.attivita);
-    var out = {
-      id: d.p.id, nome: d.p.nome, tipo: d.p.tipo || 'evento', note: d.p.note || '', versione: d.p.versione || '1',
-      aggiornato_il: d.p.aggiornato_il, aggiornato_da: d.p.aggiornato_da,
-      eventi: d.eventi.map(function (e) {
-        return { id: e.id, titolo: e.titolo, data: e.data, data_fine: e.data_fine || e.data, ora_inizio: e.ora_inizio, ora_fine: e.ora_fine, luogo: e.luogo, stato: e.stato, colore: e.colore || Events.COLORE_DEFAULT };
-      }),
-      giornate: d.giornate.map(function (g) { return pubblica(g, ['data', 'etichetta', 'ordine', 'note']); }),
-      spazi: d.spazi.map(function (s) { return pubblica(s, ['nome', 'tipo', 'indirizzo', 'note', 'ordine']); }),
-      squadra: d.squadra.map(function (s) {
-        var o = pubblica(s, ['persona_id', 'ruolo', 'giornata_id', 'spazio_id', 'note', 'ordine']);
-        o.persona = personaVista(d.persone[s.persona_id]);
-        return o;
-      }),
-      attivita: d.attivita.map(function (x) { return pubblica(x, CAMPI_ATTIVITA); }),
-      catalogo_attivita: Programma.ATTIVITA.slice(),
-      blocchi: a.blocchi,
-      avvisi: a.avvisi,
-      permessi: { modificare: Users.can(user, 'modificare'), admin: Users.can(user, 'admin') }
-    };
-    if (extra) Object.keys(extra).forEach(function (k) { out[k] = extra[k]; });
-    return out;
-  }
-
-  /** Riepilogo per il dettaglio evento. */
-  function riepilogo(pid) {
-    var p = trova('progetti', pid);
-    if (!p) return null;
-    var d = dati(pid);
-    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone, d.attivita);
-    return { id: p.id, nome: p.nome, tipo: p.tipo || 'evento', eventi: d.eventi.length, blocchi: a.blocchi, avvisi: a.avvisi.length };
-  }
-
-  function get(user, p) {
-    return vista(user, String(p && p.id || ''));
-  }
-
-  /** Allinea data e data_fine della produzione alle sue giornate (servono agli elenchi). */
-  function aggiornaDate(pid, user) {
-    var g = figli('giornate', pid).map(function (r) { return r.data; }).sort();
-    var p = produzione(pid);
-    var patch = { data: g[0] || '', data_fine: g[g.length - 1] || '' };
+  function aggiornaDate(pid) {
+    var ev = eventiDi(pid);
+    var patch = { data: ev.length ? ev[0].data : '', data_fine: ev.reduce(function (m, e) { var f = e.data_fine || e.data; return f > m ? f : m; }, '') };
+    var p = trova(pid);
     if (patch.data !== (p.data || '') || patch.data_fine !== (p.data_fine || '')) Db.update('progetti', 'id', pid, patch, null, true);
-    void user;
   }
 
-  function aggiungiGiornate(pid, e, now, user) {
-    var esistenti = {};
-    figli('giornate', pid).forEach(function (g) { esistenti[g.data] = true; });
-    var n = 0;
-    giorniEvento(e).forEach(function (d) {
-      if (esistenti[d]) return;
-      Db.insert('giornate', { id: Util.newId('gio'), progetto_id: pid, data: d, etichetta: '', ordine: '0', eliminato: 'FALSE',
-        creato_il: now, aggiornato_il: now, aggiornato_da: user.email, versione: '1' });
-      n++;
-    });
-    return n;
+  /** Riepilogo per il dettaglio evento: eventi della produzione e documenti già scritti. */
+  function riepilogo(pid) {
+    var p = trova(pid);
+    if (!p) return null;
+    return {
+      id: p.id, nome: p.nome, tipo: p.tipo || 'evento',
+      eventi: eventiDi(pid).map(function (e) { return { id: e.id, titolo: e.titolo, data: e.data }; }),
+      documenti: Documenti.riepilogo(pid)
+    };
   }
 
-  /** Crea la scheda di un evento: giornate dalle sue date, uno spazio dal suo luogo. */
-  function crea(user, p) {
+  /** Restituisce la produzione di un evento, creandola se manca. */
+  function assicura(user, p) {
     Users.require(user, 'modificare');
     return Db.withLock(function () {
-      var e = Db.find('eventi', 'id', p && p.evento_id);
-      if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
-      if (e.progetto_id && trova('progetti', e.progetto_id)) return vista(user, e.progetto_id);
-      var now = Util.nowIso();
-      var pid = Util.newId('pr');
+      var e = evento(p && p.evento_id);
+      if (trova(e.progetto_id)) return riepilogo(e.progetto_id);
+      var now = Util.nowIso(), pid = Util.newId('pr');
       Db.insert('progetti', { id: pid, nome: Util.text(e.titolo, 120) || 'Produzione', tipo: 'evento', stato: 'attivo',
         creato_il: now, creato_da: user.email, aggiornato_il: now, aggiornato_da: user.email, versione: '1', eliminato: 'FALSE', note: '' });
       Db.update('eventi', 'id', e.id, { progetto_id: pid }, null, true);
-      aggiungiGiornate(pid, e, now, user);
-      var luogo = Util.text(e.luogo, 200);
-      Db.insert('location', { id: Util.newId('spa'), progetto_id: pid, nome: luogo ? Util.text(luogo.split(',')[0], 80) : 'Spazio principale',
-        indirizzo: luogo, note: '', tipo: 'venue', ordine: '1', eliminato: 'FALSE', creato_il: now, aggiornato_il: now,
-        aggiornato_da: user.email, versione: '1' });
-      aggiornaDate(pid, user);
+      aggiornaDate(pid);
       Storico.log(user.email, e.id, 'produzione', 'crea', pid, '', { nome: e.titolo });
-      return vista(user, pid);
+      return riepilogo(pid);
     });
   }
 
-  /** Aggiunge un altro evento alla stessa produzione (festival). */
+  /** Mette un altro evento nella stessa produzione (festival): condivide Plan e Material List. */
   function collega(user, p) {
     Users.require(user, 'modificare');
     return Db.withLock(function () {
-      var pid = produzione(p && p.id).id;
-      var e = Db.find('eventi', 'id', p && p.evento_id);
-      if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
-      if (e.progetto_id === pid) return vista(user, pid);
-      if (e.progetto_id && trova('progetti', e.progetto_id)) throw new CtrlError('INVALID', 'Questo evento fa già parte di un\'altra scheda di produzione');
-      var now = Util.nowIso();
-      Db.update('eventi', 'id', e.id, { progetto_id: pid }, null, true);
-      aggiungiGiornate(pid, e, now, user);
-      Db.update('progetti', 'id', pid, { tipo: 'festival', aggiornato_il: now, aggiornato_da: user.email });
-      aggiornaDate(pid, user);
-      Storico.log(user.email, e.id, 'produzione', 'collega', pid, '', { evento: e.titolo });
-      return vista(user, pid);
+      var pr = trova(p && p.id);
+      if (!pr) throw new CtrlError('NOT_FOUND', 'Scheda di produzione non trovata');
+      var e = evento(p && p.evento_id);
+      if (e.progetto_id === pr.id) return riepilogo(pr.id);
+      if (trova(e.progetto_id)) throw new CtrlError('INVALID', 'Questo evento fa già parte di un\'altra scheda di produzione');
+      Db.update('eventi', 'id', e.id, { progetto_id: pr.id }, null, true);
+      Db.update('progetti', 'id', pr.id, { tipo: 'festival', aggiornato_il: Util.nowIso(), aggiornato_da: user.email });
+      aggiornaDate(pr.id);
+      Storico.log(user.email, e.id, 'produzione', 'collega', pr.id, '', { evento: e.titolo });
+      return riepilogo(pr.id);
     });
   }
 
-  /** Toglie un evento dalla produzione; le giornate restano (si tolgono a mano se non servono). */
   function scollega(user, p) {
     Users.require(user, 'modificare');
     return Db.withLock(function () {
-      var pid = produzione(p && p.id).id;
-      var e = Db.find('eventi', 'id', p && p.evento_id);
-      if (!e || e.progetto_id !== pid) throw new CtrlError('NOT_FOUND', 'Evento non collegato a questa scheda');
-      var collegati = Db.all('eventi').filter(function (x) { return x.progetto_id === pid; });
-      if (collegati.length <= 1) throw new CtrlError('INVALID', 'Una scheda di produzione deve avere almeno un evento');
+      var pr = trova(p && p.id);
+      if (!pr) throw new CtrlError('NOT_FOUND', 'Scheda di produzione non trovata');
+      var e = evento(p && p.evento_id);
+      if (e.progetto_id !== pr.id) throw new CtrlError('NOT_FOUND', 'Evento non collegato a questa scheda');
+      if (eventiDi(pr.id).length <= 1) throw new CtrlError('INVALID', 'Una scheda di produzione deve avere almeno un evento');
       Db.update('eventi', 'id', e.id, { progetto_id: '' }, null, true);
-      Storico.log(user.email, e.id, 'produzione', 'scollega', pid, { evento: e.titolo }, '');
-      return vista(user, pid);
+      aggiornaDate(pr.id);
+      Storico.log(user.email, e.id, 'produzione', 'scollega', pr.id, { evento: e.titolo }, '');
+      return riepilogo(pr.id);
     });
   }
 
-  // ---------- salvataggio a lotti ----------
-
-  function pulisci(tipo, campi, isNew) {
-    var def = CAMPI[tipo];
-    var out = {};
-    Object.keys(campi || {}).forEach(function (k) {
-      if (!(k in def)) throw new CtrlError('INVALID', 'Campo non valido: ' + k);
-      // date e id non si troncano: un valore troppo lungo è un errore, non un valore da accorciare
-      if ((k === 'data' || /_id$/.test(k)) && String(campi[k] == null ? '' : campi[k]).length > def[k]) throw new CtrlError('INVALID', 'Valore non valido: ' + k);
-      out[k] = Util.text(campi[k], def[k]);
-    });
-    if (tipo === 'giornata' && 'data' in out && !Util.isDate(out.data)) throw new CtrlError('INVALID', 'Data della giornata non valida');
-    if (tipo === 'giornata' && isNew && !out.data) throw new CtrlError('INVALID', 'La giornata deve avere una data');
-    if (tipo === 'spazio' && ((isNew && !out.nome) || ('nome' in out && !out.nome))) throw new CtrlError('INVALID', 'Lo spazio deve avere un nome');
-    if (tipo === 'spazio' && out.tipo && TIPI_SPAZIO.indexOf(out.tipo) < 0) throw new CtrlError('INVALID', 'Tipo di spazio non valido');
-    if (tipo === 'persona' && ((isNew && !out.nome) || ('nome' in out && !out.nome))) throw new CtrlError('INVALID', 'La persona deve avere un nome');
-    if (tipo === 'persona' && out.email && !Util.isEmail(out.email)) throw new CtrlError('INVALID', 'Email non valida: ' + out.email);
-    if (tipo === 'produzione' && 'nome' in out && !out.nome) throw new CtrlError('INVALID', 'La scheda deve avere un nome');
-    if ('ordine' in out && out.ordine && !/^\d{1,6}$/.test(out.ordine)) throw new CtrlError('INVALID', 'Ordine non valido');
-    if (tipo === 'squadra' && isNew && !out.persona_id) throw new CtrlError('INVALID', 'Scegli una persona');
-    if (tipo === 'attivita') {
-      if (isNew && !out.giornata_id) throw new CtrlError('INVALID', 'L\'attività deve appartenere a una giornata');
-      if ('giornata_id' in out && !out.giornata_id) throw new CtrlError('INVALID', 'L\'attività deve appartenere a una giornata');
-      ['ora_inizio', 'ora_fine'].forEach(function (k) {
-        if (k in out && out[k] && !Programma.isOra(out[k])) throw new CtrlError('INVALID', 'Orario non valido: ' + out[k] + ' (usa HH:MM)');
-      });
-      if (out.tipo && out.tipo !== Programma.CUSTOM && Programma.ATTIVITA.indexOf(out.tipo) < 0) throw new CtrlError('INVALID', 'Attività non valida: ' + out.tipo);
-    }
-    return out;
-  }
-
-  function idValido(tipo, id) {
-    return typeof id === 'string' && new RegExp('^' + PREFISSI[tipo] + '_[a-z0-9]{8,24}$').test(id);
-  }
-
-  /**
-   * Applica un lotto di operazioni. Ogni operazione:
-   * { tipo: 'produzione'|'giornata'|'spazio'|'squadra'|'persona', azione: 'crea'|'modifica'|'elimina',
-   *   id, campi: {...}, versione: '<versione letta>' (facoltativa) }
-   */
-  function salva(user, p) {
-    Users.require(user, 'modificare');
-    p = p || {};
-    var ops = p.ops;
-    if (!Array.isArray(ops) || !ops.length) throw new CtrlError('INVALID', 'Nessuna modifica');
-    if (ops.length > MAX_OPS) throw new CtrlError('INVALID', 'Troppe modifiche in un solo salvataggio');
-
-    return Db.withLock(function () {
-      var pid = produzione(p.id).id;
-      var now = Util.nowIso();
-      var piano = [];
-      // stato simulato per validare il lotto prima di scrivere
-      var appartiene = { giornata: {}, spazio: {}, squadra: {}, attivita: {} };
-      FIGLI.forEach(function (t) {
-        figli(TABELLE[t], pid).forEach(function (r) { appartiene[t][r.id] = r; });
-      });
-      var persone = {};
-      Db.all('persone').forEach(function (r) { if (vivo(r)) persone[r.id] = r; });
-      var dateUsate = {};
-      Object.keys(appartiene.giornata).forEach(function (id) { dateUsate[appartiene.giornata[id].data] = id; });
-
-      ops.forEach(function (op, i) {
-        var where = ' (modifica ' + (i + 1) + ')';
-        if (!op || typeof op !== 'object') throw new CtrlError('INVALID', 'Modifica non valida' + where);
-        var tipo = op.tipo, azione = op.azione;
-        if (!(tipo in CAMPI)) throw new CtrlError('INVALID', 'Tipo non valido' + where);
-        if (['crea', 'modifica', 'elimina'].indexOf(azione) < 0) throw new CtrlError('INVALID', 'Azione non valida' + where);
-        if (tipo === 'produzione') {
-          if (azione !== 'modifica') throw new CtrlError('INVALID', 'Azione non valida sulla scheda' + where);
-          piano.push({ tipo: tipo, azione: azione, id: pid, campi: pulisci(tipo, op.campi, false), versione: op.versione });
-          return;
-        }
-        if (tipo === 'persona' && azione === 'elimina') throw new CtrlError('FORBIDDEN', 'Le persone si tolgono dalla rubrica dalle impostazioni');
-        if (!idValido(tipo, op.id)) throw new CtrlError('INVALID', 'Identificativo non valido' + where);
-        var esiste = tipo === 'persona' ? persone[op.id] : appartiene[tipo][op.id];
-        var crea = azione === 'crea' && !esiste; // un "crea" ripetuto diventa una modifica: nessun doppione
-        if (azione !== 'crea' && !esiste) throw new CtrlError('NOT_FOUND', 'Elemento non trovato, forse già tolto' + where);
-        if (azione === 'crea' && !esiste) {
-          // l'id non deve appartenere a un'altra produzione
-          var altrove = Db.find(TABELLE[tipo], 'id', op.id);
-          if (altrove) throw new CtrlError('INVALID', 'Identificativo già usato' + where);
-        }
-        var campi = azione === 'elimina' ? {} : pulisci(tipo, op.campi, crea);
-        if (tipo === 'giornata' && azione === 'elimina' && esiste && dateUsate[esiste.data] === op.id) delete dateUsate[esiste.data];
-        if (tipo === 'giornata' && campi.data) {
-          var gia = dateUsate[campi.data];
-          if (gia && gia !== op.id) throw new CtrlError('INVALID', 'C\'è già una giornata il ' + campi.data);
-          if (esiste && esiste.data) delete dateUsate[esiste.data];
-          dateUsate[campi.data] = op.id;
-        }
-        if (tipo === 'attivita' && azione !== 'elimina') {
-          if (campi.giornata_id && !appartiene.giornata[campi.giornata_id]) throw new CtrlError('INVALID', 'Giornata non valida' + where);
-          if (campi.spazio_id && !appartiene.spazio[campi.spazio_id]) throw new CtrlError('INVALID', 'Spazio non valido' + where);
-        }
-        if (tipo === 'squadra' && azione !== 'elimina') {
-          if (campi.persona_id && !persone[campi.persona_id]) throw new CtrlError('INVALID', 'Persona non trovata nella rubrica' + where);
-          if (campi.giornata_id && !appartiene.giornata[campi.giornata_id]) throw new CtrlError('INVALID', 'Giornata non valida' + where);
-          if (campi.spazio_id && !appartiene.spazio[campi.spazio_id]) throw new CtrlError('INVALID', 'Spazio non valido' + where);
-        }
-        // aggiorna lo stato simulato per le operazioni successive del lotto
-        if (tipo === 'persona') persone[op.id] = persone[op.id] || { id: op.id };
-        else if (azione === 'elimina') delete appartiene[tipo][op.id];
-        else appartiene[tipo][op.id] = appartiene[tipo][op.id] || { id: op.id, data: campi.data };
-        piano.push({ tipo: tipo, azione: crea ? 'crea' : (azione === 'crea' ? 'modifica' : azione), id: op.id, campi: campi, versione: op.versione, prima: esiste || null });
-      });
-
-      if (Object.keys(appartiene.attivita).length > MAX_ATTIVITA) throw new CtrlError('INVALID', 'Troppe attività in una produzione (massimo ' + MAX_ATTIVITA + ')');
-
-      // scrittura
-      var conflitti = [];
-      var riepilogo = {};
-      piano.forEach(function (o) {
-        var tabella = o.tipo === 'produzione' ? 'progetti' : TABELLE[o.tipo];
-        riepilogo[o.tipo + '.' + o.azione] = (riepilogo[o.tipo + '.' + o.azione] || 0) + 1;
-        if (o.azione === 'crea') {
-          var row = { id: o.id, eliminato: 'FALSE', creato_il: now, aggiornato_il: now, aggiornato_da: user.email, versione: '1' };
-          if (o.tipo === 'persona') row.creato_da = user.email; else row.progetto_id = pid;
-          if (o.tipo === 'spazio' && !o.campi.tipo) row.tipo = 'altro';
-          Object.keys(o.campi).forEach(function (k) { row[k] = o.campi[k]; });
-          Db.insert(tabella, row);
-          return;
-        }
-        var attuale = Db.find(tabella, 'id', o.id);
-        if (o.versione && String(o.versione) !== String(attuale.versione || '1') && attuale.aggiornato_da !== user.email) {
-          conflitti.push({ tipo: o.tipo, id: o.id, da: attuale.aggiornato_da, il: attuale.aggiornato_il });
-        }
-        if (o.azione === 'elimina') {
-          Db.update(tabella, 'id', o.id, { eliminato: 'TRUE', aggiornato_il: now, aggiornato_da: user.email });
-          // chi era assegnato a una giornata o uno spazio tolti resta in squadra, senza quell'assegnazione
-          if (o.tipo === 'giornata' || o.tipo === 'spazio') {
-            var campo = o.tipo === 'giornata' ? 'giornata_id' : 'spazio_id';
-            figli('squadra', pid).forEach(function (s) {
-              if (s[campo] === o.id) { var patch = {}; patch[campo] = ''; patch.aggiornato_il = now; patch.aggiornato_da = user.email; Db.update('squadra', 'id', s.id, patch); }
-            });
-          }
-          // le attività di una giornata tolta si tolgono con lei; quelle di uno spazio tolto restano senza spazio
-          if (o.tipo === 'giornata') {
-            figli('attivita', pid).forEach(function (a) {
-              if (a.giornata_id === o.id) Db.update('attivita', 'id', a.id, { eliminato: 'TRUE', aggiornato_il: now, aggiornato_da: user.email });
-            });
-          }
-          if (o.tipo === 'spazio') {
-            figli('attivita', pid).forEach(function (a) {
-              if (a.spazio_id === o.id) Db.update('attivita', 'id', a.id, { spazio_id: '', aggiornato_il: now, aggiornato_da: user.email });
-            });
-          }
-          return;
-        }
-        var patch = {};
-        Object.keys(o.campi).forEach(function (k) { patch[k] = o.campi[k]; });
-        patch.aggiornato_il = now; patch.aggiornato_da = user.email;
-        Db.update(tabella, 'id', o.id, patch);
-      });
-      if (piano.some(function (o) { return o.tipo === 'giornata'; })) aggiornaDate(pid, user);
-      Db.update('progetti', 'id', pid, { aggiornato_il: now, aggiornato_da: user.email }, null, true);
-      Storico.log(user.email, '', 'produzione', 'salva', pid, '', JSON.stringify({ modifiche: riepilogo, operazioni: piano.map(function (o) { return [o.tipo, o.azione, o.id]; }) }));
-      return vista(user, pid, { conflitti: conflitti, salvato_il: now });
-    });
-  }
-
-  // ---------- rubrica ----------
-
-  function rubrica(user) {
-    void user;
-    return Db.all('persone').filter(vivo)
-      .map(personaVista)
-      .sort(function (a, b) { return a.nome.localeCompare(b.nome, 'it'); });
-  }
-
-  /** Toglie una persona dalla rubrica (solo admin). Le squadre che la usano ricevono un avviso. */
-  function eliminaPersona(user, p) {
-    Users.require(user, 'admin');
-    return Db.withLock(function () {
-      var r = trova('persone', p && p.id);
-      if (!r) throw new CtrlError('NOT_FOUND', 'Persona non trovata');
-      Db.update('persone', 'id', r.id, { eliminato: 'TRUE', aggiornato_il: Util.nowIso(), aggiornato_da: user.email });
-      Storico.log(user.email, '', 'persone', 'elimina', r.id, r.nome, '');
-      return rubrica(user);
-    });
-  }
-
-  return {
-    TIPI_SPAZIO: TIPI_SPAZIO, get: get, riepilogo: riepilogo, crea: crea, collega: collega, scollega: scollega,
-    salva: salva, rubrica: rubrica, eliminaPersona: eliminaPersona
-  };
+  return { riepilogo: riepilogo, assicura: assicura, collega: collega, scollega: scollega };
 })();
 
-// ===== 24_Programma.js =====
+// ===== 24_Documenti.js =====
 /**
- * CTRL · Programma della produzione (Production Schedule): regole comuni.
+ * CTRL · Documenti operativi di una produzione: Production Plan ("plan") e Material List ("materiali").
  *
- * Le stesse regole sono in app/js/programma.js (l'app le usa mentre scrivi);
- * tests/backend/programma.test.mjs verifica che le due copie diano gli stessi risultati.
- *
- * - Orari "HH:MM". La giornata operativa va dalle 06:00 alle 05:59 del giorno dopo:
- *   un load-out all'01:00 resta nella giornata dello show e si ordina dopo le 23:59.
- * - Fine prima dell'inizio = attività che passa la mezzanotte.
- * - Sovrapposizione: due attività con inizio e fine che si accavallano nello stesso spazio
- *   o con lo stesso responsabile. È un avviso, non blocca nulla.
+ * Ogni documento è un JSON salvato per intero (spezzato in parti da 30.000 caratteri, limite delle celle).
+ * Salvataggio ottimistico: il client manda la versione che ha letto; se nel frattempo è cambiata,
+ * la risposta è { conflitto: true, versione, dati } (non un errore) e il client unisce le modifiche per riga.
  */
-var Programma = (function () {
-  var ATTIVITA = ['Load-in', 'Setup', 'Stage Setup', 'Backline Setup', 'Soundcheck', 'Line Check', 'Rehearsal',
-    'Doors Open', 'Show Start', 'Show End', 'Changeover', 'Break', 'Lunch', 'Dinner', 'Catering', 'Load-out',
-    'Strike', 'Travel', 'Transfer', 'Meeting', 'Artist Arrival', 'Artist Departure'];
-  var CUSTOM = 'Custom';
-  var INIZIO_GIORNATA = 360;
-  var DURATA_MAX = 12 * 60;
+var Documenti = (function () {
+  var TIPI = ['plan', 'materiali'];
+  var PARTE = 30000;
+  var MAX_CARATTERI = 600000;
+  var CATALOGO_ATTIVITA = ['Load-in', 'Setup', 'Stage Setup', 'Backline Setup', 'Line Check', 'Soundcheck', 'Rehearsal', 'Doors Open',
+    'Show Start', 'Show End', 'Changeover', 'Break', 'Lunch', 'Dinner', 'Catering', 'Load-out', 'Strike', 'Travel', 'Transfer'];
 
-  function isOra(s) { return typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s); }
-
-  function minuti(s) {
-    if (!isOra(s)) return null;
-    var m = parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3), 10);
-    return m < INIZIO_GIORNATA ? m + 1440 : m;
+  function vivo(r) { return r && !Util.bool(r.eliminato); }
+  function tipoValido(t) {
+    if (TIPI.indexOf(t) < 0) throw new CtrlError('INVALID', 'Tipo di documento non valido');
+    return t;
+  }
+  function produzione(id) {
+    var p = Db.find('progetti', 'id', String(id || ''));
+    if (!vivo(p)) throw new CtrlError('NOT_FOUND', 'Scheda di produzione non trovata');
+    return p;
+  }
+  function trovaDoc(pid, tipo) {
+    return Db.all('documenti').filter(function (d) { return d.progetto_id === pid && d.tipo === tipo && vivo(d); })[0] || null;
+  }
+  function leggi(doc) {
+    var n = parseInt(doc.parti, 10) || 0;
+    var parti = Db.all('documenti_parti').filter(function (r) { return r.documento_id === doc.id; })
+      .sort(function (a, b) { return a.n - b.n; }).slice(0, n);
+    try { return JSON.parse(parti.map(function (r) { return r.testo; }).join('')); } catch (e) { return null; }
   }
 
-  function intervallo(a) {
-    var s = minuti(a.ora_inizio);
-    if (s === null) return null;
-    var e = minuti(a.ora_fine);
-    if (e === null) return { s: s, e: null };
-    if (e <= s) e += 1440;
-    return { s: s, e: e };
+  // ---------- pulizia dei dati in arrivo ----------
+  function t(v, max) { return Util.text(v, max); }
+  function idv(v, i, pre) { var s = String(v || '').replace(/[^\w-]/g, '').slice(0, 40); return s || pre + '_' + i; }
+  function lista(v, max) { return Array.isArray(v) ? v.slice(0, max) : []; }
+
+  function pulisciPlan(d) {
+    d = d || {};
+    return {
+      lingua: d.lingua === 'it' ? 'it' : 'en',
+      crew: lista(d.crew, 100).map(function (r, i) {
+        r = r || {};
+        return { id: idv(r.id, i, 'c'), nome: t(r.nome, 80), ruolo: t(r.ruolo, 80), telefono: t(r.telefono, 30), email: t(r.email, 120) };
+      }),
+      giorni: lista(d.giorni, 31).map(function (g, gi) {
+        g = g || {};
+        return {
+          id: idv(g.id, gi, 'g'), data: Util.isDate(g.data) ? g.data : '',
+          righe: lista(g.righe, 400).map(function (r, i) {
+            r = r || {};
+            return { id: idv(r.id, i, 'r'), sez: t(r.sez, 40), ora: t(r.ora, 20), att: t(r.att, 120), loc: t(r.loc, 80), note: t(r.note, 600) };
+          })
+        };
+      })
+    };
   }
-
-  function nome(a) { return a.tipo === CUSTOM ? (a.attivita || '') : (a.tipo || ''); }
-
-  function norm(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
-
-  /** Ordine cronologico; a parità di orario conta "ordine"; senza orario in fondo. */
-  function ordina(lista) {
-    return lista.slice().sort(function (a, b) {
-      var sa = minuti(a.ora_inizio), sb = minuti(b.ora_inizio);
-      if (sa === null) sa = 99999;
-      if (sb === null) sb = 99999;
-      if (sa !== sb) return sa - sb;
-      return (parseInt(a.ordine, 10) || 0) - (parseInt(b.ordine, 10) || 0);
-    });
+  function pulisciMateriali(d) {
+    d = d || {};
+    return {
+      sezioni: lista(d.sezioni, 100).map(function (s, si) {
+        s = s || {};
+        return {
+          id: idv(s.id, si, 's'), nome: t(s.nome, 80),
+          righe: lista(s.righe, 500).map(function (r, i) {
+            r = r || {};
+            return { id: idv(r.id, i, 'm'), voce: t(r.voce, 120), qta: t(r.qta, 12), unita: t(r.unita, 20), note: t(r.note, 300) };
+          })
+        };
+      })
+    };
   }
+  function pulisci(tipo, d) { return tipo === 'plan' ? pulisciPlan(d) : pulisciMateriali(d); }
 
-  /** Coppie di attività della stessa giornata che si accavallano. */
-  function sovrapposizioni(lista) {
-    var out = [];
-    var l = ordina(lista);
-    for (var i = 0; i < l.length; i++) {
-      var a = intervallo(l[i]);
-      if (!a || a.e === null) continue;
-      for (var j = i + 1; j < l.length; j++) {
-        var b = intervallo(l[j]);
-        if (!b || b.e === null) continue;
-        if (!(a.s < b.e && b.s < a.e)) continue;
-        var motivo = '';
-        if (l[i].spazio_id && l[i].spazio_id === l[j].spazio_id) motivo = 'spazio';
-        else if (norm(l[i].responsabile) && norm(l[i].responsabile) === norm(l[j].responsabile)) motivo = 'responsabile';
-        if (motivo) out.push({ a: l[i].id, b: l[j].id, motivo: motivo });
+  // ---------- suggerimenti dai documenti già scritti ----------
+  function suggerimenti(tipo, escludiDoc) {
+    var docs = Db.all('documenti').filter(function (d) { return d.tipo === tipo && vivo(d) && d.id !== escludiDoc; })
+      .sort(function (a, b) { return String(b.aggiornato_il).localeCompare(String(a.aggiornato_il)); }).slice(0, 40);
+    var visti = {}, out = [];
+    docs.forEach(function (doc) {
+      var j = leggi(doc);
+      if (!j) return;
+      if (tipo === 'plan') {
+        j.crew.forEach(function (c) {
+          var k = c.nome.toLowerCase();
+          if (!k || visti[k]) return;
+          visti[k] = true;
+          out.push({ nome: c.nome, ruolo: c.ruolo, telefono: c.telefono, email: c.email });
+        });
+      } else {
+        j.sezioni.forEach(function (s) {
+          s.righe.forEach(function (r) {
+            var k = r.voce.toLowerCase();
+            if (!k || visti[k]) return;
+            visti[k] = true;
+            out.push({ voce: r.voce, unita: r.unita, note: r.note });
+          });
+        });
       }
-    }
-    return out;
-  }
-
-  function etichetta(a) { return (nome(a) || 'Attività senza nome') + (a.ora_inizio ? ' ' + a.ora_inizio : ''); }
-
-  /** Avvisi del programma: [{ id, giornata_id, testo }]. */
-  function avvisi(giornate, attivita) {
-    var out = [];
-    giornate.forEach(function (g) {
-      var del = attivita.filter(function (a) { return a.giornata_id === g.id; });
-      var giorno = g.data.slice(8, 10) + '/' + g.data.slice(5, 7);
-      var perId = {};
-      del.forEach(function (a) { perId[a.id] = a; });
-      ordina(del).forEach(function (a) {
-        if (!nome(a)) out.push({ id: a.id, giornata_id: g.id, testo: giorno + ': un\'attività non ha il tipo' });
-        if (!isOra(a.ora_inizio)) out.push({ id: a.id, giornata_id: g.id, testo: giorno + ': ' + (nome(a) || 'un\'attività') + ' senza orario di inizio' });
-        var iv = intervallo(a);
-        if (iv && iv.e !== null && iv.e - iv.s > DURATA_MAX) out.push({ id: a.id, giornata_id: g.id, testo: giorno + ': ' + etichetta(a) + ' dura più di 12 ore, controlla gli orari' });
-      });
-      sovrapposizioni(del).forEach(function (c) {
-        out.push({ id: c.a, altro: c.b, giornata_id: g.id, testo: giorno + ': ' + etichetta(perId[c.a]) + ' e ' + etichetta(perId[c.b]) + ' si sovrappongono (' + (c.motivo === 'spazio' ? 'stesso spazio' : 'stesso responsabile') + ')' });
-      });
     });
-    return out;
+    return out.slice(0, 500);
   }
 
-  return {
-    ATTIVITA: ATTIVITA, CUSTOM: CUSTOM, isOra: isOra, minuti: minuti, intervallo: intervallo, nome: nome,
-    ordina: ordina, sovrapposizioni: sovrapposizioni, avvisi: avvisi
-  };
+  function intestazione(pid) {
+    var eventi = Db.all('eventi').filter(function (e) { return e.progetto_id === pid; })
+      .sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); });
+    return eventi.map(function (e) {
+      return { id: e.id, titolo: e.titolo, data: e.data, data_fine: e.data_fine || e.data, ora_inizio: e.ora_inizio, luogo: e.luogo };
+    });
+  }
+
+  function vista(user, p, tipo, doc, dati) {
+    return {
+      produzione: { id: p.id, nome: p.nome, tipo: p.tipo || 'evento' },
+      eventi: intestazione(p.id),
+      tipo: tipo,
+      versione: doc ? String(doc.versione) : '0',
+      dati: dati,
+      aggiornato_il: doc ? doc.aggiornato_il : '',
+      aggiornato_da: doc ? doc.aggiornato_da : '',
+      permessi: { modificare: Users.can(user, 'modificare') },
+      catalogo_attivita: tipo === 'plan' ? CATALOGO_ATTIVITA.slice() : undefined,
+      suggerimenti: suggerimenti(tipo, doc && doc.id)
+    };
+  }
+
+  function get(user, p) {
+    var tipo = tipoValido(p && p.tipo), pr = produzione(p && p.produzione_id);
+    var doc = trovaDoc(pr.id, tipo);
+    return vista(user, pr, tipo, doc, doc ? leggi(doc) : null);
+  }
+
+  function scrivi(doc, testo) {
+    var pezzi = [];
+    for (var i = 0; i < testo.length; i += PARTE) pezzi.push(testo.slice(i, i + PARTE));
+    var esist = Db.all('documenti_parti').filter(function (r) { return r.documento_id === doc.id; });
+    var vecchie = {};
+    esist.forEach(function (r) { vecchie[r.n] = r; });
+    pezzi.forEach(function (txt, n) {
+      if (vecchie[n]) Db.update('documenti_parti', 'id', vecchie[n].id, { testo: txt }, null, true);
+      else Db.insert('documenti_parti', { id: doc.id + '_' + n, documento_id: doc.id, n: String(n), testo: txt });
+    });
+    return pezzi.length;
+  }
+
+  function salva(user, p) {
+    Users.require(user, 'modificare');
+    var tipo = tipoValido(p && p.tipo);
+    var pr = produzione(p && p.produzione_id);
+    var dati = pulisci(tipo, p && p.dati);
+    var testo = JSON.stringify(dati);
+    if (testo.length > MAX_CARATTERI) throw new CtrlError('INVALID', 'Documento troppo grande');
+    return Db.withLock(function () {
+      var doc = trovaDoc(pr.id, tipo);
+      var attuale = doc ? String(doc.versione) : '0';
+      if (String(p.versione || '0') !== attuale) {
+        var out = vista(user, pr, tipo, doc, doc ? leggi(doc) : null);
+        out.conflitto = true;
+        return out;
+      }
+      var now = Util.nowIso(), nuova = String((parseInt(attuale, 10) || 0) + 1);
+      if (!doc) {
+        doc = Db.insert('documenti', { id: Util.newId('doc'), progetto_id: pr.id, tipo: tipo, versione: '0', parti: '0',
+          creato_il: now, creato_da: user.email, aggiornato_il: now, aggiornato_da: user.email, eliminato: 'FALSE' });
+      }
+      var n = scrivi(doc, testo);
+      Db.update('documenti', 'id', doc.id, { versione: nuova, parti: String(n), aggiornato_il: now, aggiornato_da: user.email }, null, true);
+      var ev = intestazione(pr.id)[0];
+      Storico.log(user.email, ev ? ev.id : '', 'documento', 'salva', doc.id, '', { tipo: tipo, versione: nuova, caratteri: testo.length });
+      return { conflitto: false, versione: nuova, aggiornato_il: now, aggiornato_da: user.email, dati: dati };
+    });
+  }
+
+  return { TIPI: TIPI, CATALOGO_ATTIVITA: CATALOGO_ATTIVITA, get: get, salva: salva, pulisci: pulisci, riepilogo: function (pid) {
+    var r = {};
+    TIPI.forEach(function (tp) { var d = trovaDoc(pid, tp); r[tp] = d ? { versione: d.versione, aggiornato_il: d.aggiornato_il } : null; });
+    return r;
+  } };
 })();
 
 // ===== 80_Api.js =====
@@ -1672,13 +1418,11 @@ var ACTIONS = {
   'allegati.scarica': { fn: function (u, p) { return Allegati.scarica(u, p); } },
   'allegati.elimina': { fn: function (u, p) { return Allegati.elimina(u, p); } },
 
-  'produzione.get': { fn: function (u, p) { return Produzioni.get(u, p); } },
-  'produzione.crea': { fn: function (u, p) { return Produzioni.crea(u, p); } },
+  'produzione.assicura': { fn: function (u, p) { return Produzioni.assicura(u, p); } },
   'produzione.collega': { fn: function (u, p) { return Produzioni.collega(u, p); } },
   'produzione.scollega': { fn: function (u, p) { return Produzioni.scollega(u, p); } },
-  'produzione.salva': { fn: function (u, p) { return Produzioni.salva(u, p); } },
-  'persone.list': { fn: function (u) { return Produzioni.rubrica(u); } },
-  'persone.elimina': { fn: function (u, p) { return Produzioni.eliminaPersona(u, p); } },
+  'documento.get': { fn: function (u, p) { return Documenti.get(u, p); } },
+  'documento.salva': { fn: function (u, p) { return Documenti.salva(u, p); } },
 
   'sync.run': { fn: function (u) { Users.require(u, 'impostazioni'); return CalendarSync.run(u.email); } },
 

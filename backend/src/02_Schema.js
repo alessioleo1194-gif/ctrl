@@ -6,7 +6,7 @@
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 3;
+var SCHEMA_VERSION = 4;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -35,6 +35,9 @@ var SCHEMA = {
     'aggiornato_il', 'aggiornato_da', 'versione'],
   squadra: ['id', 'progetto_id', 'persona_id', 'ruolo', 'giornata_id', 'spazio_id', 'note', 'ordine', 'eliminato',
     'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione'],
+  // documenti operativi di una produzione (Production Plan, Material List): JSON spezzato in parti
+  documenti: ['id', 'progetto_id', 'tipo', 'versione', 'parti', 'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'eliminato'],
+  documenti_parti: ['id', 'documento_id', 'n', 'testo'],
   utenti: ['id', 'email', 'nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo', 'creato_il',
     'aggiornato_il', 'versione', 'ultimo_accesso'],
   sessioni: ['hash', 'email', 'creata', 'scade', 'ultimo_uso', 'dispositivo'],
