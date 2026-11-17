@@ -42,6 +42,17 @@ Tabelle in `backend/src/02_Schema.js`. Eventi:
 - Eventi ricorrenti: ogni occorrenza è un evento distinto (`cal_key = id@data`).
 - Il colore è quello dell'evento sul Calendar; se l'evento non ne ha uno, quello del calendario.
 
+Scheda di produzione (`23_Produzioni.js`): una produzione (`progetti`) raggruppa uno o più eventi e contiene
+`giornate`, spazi (`location`), `squadra` (che punta alla rubrica comune `persone`) e il programma (`attivita`).
+L'app salva a lotti con `produzione.salva`: id generati dall'app, lotto validato tutto prima di scrivere,
+un "crea" ripetuto diventa una modifica. L'app ordina il lotto: prima giornate, spazi e persone create,
+per ultime giornate e spazi tolti.
+
+Programma (Production Schedule): le regole (voci di attività, ordine sulla giornata operativa 06:00-05:59,
+sovrapposizioni, avvisi) stanno in `backend/src/24_Programma.js`; `npm run build` le copia in `app/js/programma.js`
+e `npm run check` verifica che le due copie coincidano. Il documento usa `app/js/documento-dati.js` sia per
+l'anteprima sul sito sia per il PDF (`app/js/pdf.js`, jsPDF in `app/vendor`, caricato solo quando serve).
+
 ## Attività automatiche (trigger Apps Script)
 
 | Funzione | Quando | Cosa fa |
