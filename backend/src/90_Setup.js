@@ -81,11 +81,12 @@ function setup_(env) {
   Db.clearCache();
   if (!Db.find('utenti', 'email', props.ADMIN_EMAIL)) {
     Db.insert('utenti', {
-      id: Util.newId('usr'), email: props.ADMIN_EMAIL, nome: 'Admin', ruolo: 'ADMIN', puo_caricare: 'TRUE',
+      id: Util.newId('usr'), email: props.ADMIN_EMAIL, nome: 'Admin', ruolo: 'OWNER', puo_caricare: 'TRUE',
       puo_modificare: 'TRUE', attivo: 'TRUE', creato_il: Util.nowIso(), aggiornato_il: Util.nowIso(), versione: '1'
     });
-    log.push('Creato amministratore ' + props.ADMIN_EMAIL);
+    log.push('Creato proprietario ' + props.ADMIN_EMAIL);
   }
+  migraRuoli_(log);
   if (!Settings.getRaw('schema_versione')) Settings.setRaw('schema_versione', String(SCHEMA_VERSION));
 
   installTriggers_();
@@ -96,6 +97,25 @@ function setup_(env) {
 
   console.log(log.join('\n'));
   return log;
+}
+
+/**
+ * Riscrive i ruoli vecchi (ADMIN, COLLABORATORE, LETTURA) in OWNER / PRODUCTION / VIEWER.
+ * Idempotente. Chi perde permessi (altri ADMIN) viene disconnesso. Il proprietario è solo ADMIN_EMAIL.
+ */
+function migraRuoli_(log) {
+  Db.clearCache();
+  Db.all('utenti').forEach(function (u) {
+    var nuovo = Users.ruoloDi(u);
+    var daScrivere = u.ruolo !== nuovo;
+    if (!daScrivere) return;
+    var prima = JSON.parse(JSON.stringify(u));
+    var rw = nuovo === 'VIEWER' ? 'FALSE' : 'TRUE';
+    Db.update('utenti', 'email', u.email, { ruolo: nuovo, puo_caricare: rw, puo_modificare: rw, aggiornato_il: Util.nowIso() });
+    Storico.log('setup', '', 'utenti', 'ruolo_migrato', u.email, prima.ruolo, nuovo);
+    if (String(prima.ruolo).toUpperCase() === 'ADMIN' && nuovo !== 'OWNER') Auth.revokeAll(u.email);
+    log.push('Ruolo ' + u.email + ': ' + prima.ruolo + ' → ' + nuovo);
+  });
 }
 
 function installTriggers_() {

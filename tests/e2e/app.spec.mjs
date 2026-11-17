@@ -143,11 +143,16 @@ test('impostazioni: utenti, liste a tendina, sincronizzazione', async ({ page },
   const dlg = page.locator('dialog.sheet');
   await dlg.getByLabel('Email').fill('manuel@example.com');
   await dlg.getByLabel('Nome').fill('Manuel');
-  await dlg.getByLabel('Ruolo').selectOption('COLLABORATORE');
-  await dlg.getByText('Può caricare file').click();
+  await expect(dlg.getByLabel('Ruolo').locator('option')).toHaveText(['Production · lavora su Plan e Material List', 'Viewer · sola lettura']);
+  await dlg.getByLabel('Ruolo').selectOption('PRODUCTION');
   await dlg.getByRole('button', { name: 'Salva' }).click();
-  await expect(page.getByText('manuel@example.com')).toBeVisible();
-  await expect(page.getByText('Carica file')).toBeVisible();
+  const riga = page.locator('.urow', { hasText: 'manuel@example.com' });
+  await expect(riga).toBeVisible();
+  await expect(riga.locator('.tag', { hasText: 'Production' })).toBeVisible();
+  // il proprietario è Owner e non si modifica
+  const owner = page.locator('.urow', { hasText: ADMIN });
+  await expect(owner.locator('.tag.owner')).toHaveText('Owner');
+  await expect(owner.getByRole('button', { name: 'Modifica' })).toBeDisabled();
 
   const aree = page.locator('section.card', { hasText: 'Aree del materiale' });
   await aree.getByRole('button', { name: 'Aggiungi valore' }).click();
@@ -173,7 +178,7 @@ test('utente in sola lettura: niente creazione, niente impostazioni, note non mo
   void admin;
   const code = env.state.mails.at(-1).subject.match(/(\d{6})/)[1];
   const tok = env.ctx.handleRequest(JSON.stringify({ action: 'auth.verifyCode', payload: { email: ADMIN, code } })).data.token;
-  env.ctx.handleRequest(JSON.stringify({ action: 'utenti.save', token: tok, payload: { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'LETTURA' } }));
+  env.ctx.handleRequest(JSON.stringify({ action: 'utenti.save', token: tok, payload: { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'VIEWER' } }));
   await login(page, env, 'tecnico@example.com');
   await expect(page.locator('.fab')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Nuovo evento' })).toHaveCount(0);
@@ -494,7 +499,7 @@ test('sola lettura: vede i fogli e genera il documento, ma non può scrivere né
   const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo === 'Cantelmo: Maria Mazzotta').id;
   const p = apiCall(env, adm, 'produzione.assicura', { evento_id: evId }).data;
   apiCall(env, adm, 'documento.salva', { produzione_id: p.id, tipo: 'plan', versione: '0', dati: { crew: [], giorni: [{ id: 'g1', data: isoDay(2), righe: [{ id: 'r1', sez: '', ora: '18:00', att: 'Doors Open', loc: '', note: '' }] }] } });
-  apiCall(env, adm, 'utenti.save', { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'LETTURA' });
+  apiCall(env, adm, 'utenti.save', { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'VIEWER' });
   await login(page, env, 'tecnico@example.com');
   await page.getByText('Cantelmo: Maria Mazzotta').click();
   await page.getByRole('link', { name: /Production Plan/ }).click();

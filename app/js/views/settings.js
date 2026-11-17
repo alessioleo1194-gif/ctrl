@@ -3,7 +3,8 @@ import { h, icon, sheet, toast, loading } from '../ui.js';
 import { store, loadEvents } from '../app.js';
 import { stamp } from '../format.js';
 
-const RUOLI = { ADMIN: 'Amministratore', COLLABORATORE: 'Collaboratore', LETTURA: 'Sola lettura' };
+const RUOLI = { OWNER: 'Owner', PRODUCTION: 'Production', VIEWER: 'Viewer' };
+const RUOLI_FORM = { PRODUCTION: 'Production · lavora su Plan e Material List', VIEWER: 'Viewer · sola lettura' };
 
 export async function renderSettings(main) {
   const wrap = h('div', { class: 'settings' });
@@ -36,37 +37,29 @@ function usersCard(users, reload) {
       h('b', {}, u.nome || u.email),
       h('small', {}, u.email),
       h('div', { class: 'chips' },
-        h('span', { class: 'tag' }, RUOLI[u.ruolo] || u.ruolo),
-        u.ruolo === 'COLLABORATORE' && u.puo_caricare ? h('span', { class: 'tag' }, 'Carica file') : null,
-        u.ruolo === 'COLLABORATORE' && u.puo_modificare ? h('span', { class: 'tag' }, 'Modifica contenuti') : null,
+        h('span', { class: 'tag' + (u.ruolo === 'OWNER' ? ' owner' : '') }, RUOLI[u.ruolo] || u.ruolo),
+        u.protetto ? h('span', { class: 'help' }, 'Non modificabile') : null,
         !u.attivo ? h('span', { class: 'tag danger' }, 'Disattivato') : null,
         u.ultimo_accesso ? h('span', { class: 'help' }, 'ultimo accesso ' + stamp(u.ultimo_accesso)) : null)),
-    h('button', { class: 'btn', onclick: () => userForm(u, reload) }, 'Modifica')));
+    h('button', { class: 'btn', disabled: !!u.protetto, onclick: () => userForm(u, reload) }, 'Modifica')));
   return h('section', { class: 'card' },
     h('header', {}, h('span', { class: 'label' }, 'Utenti'), h('button', { class: 'btn primary', onclick: () => userForm(null, reload) }, icon('plus'), 'Aggiungi utente')),
     h('div', { class: 'ulist' }, rows.length ? rows : h('div', { class: 'empty' }, 'Nessun utente')));
 }
 
 function userForm(u, reload) {
-  const v = u || { email: '', nome: '', ruolo: 'LETTURA', puo_caricare: false, puo_modificare: false, attivo: true };
+  const v = u || { email: '', nome: '', ruolo: 'VIEWER', attivo: true };
   const err = h('div', { class: 'err', role: 'alert' });
   const email = h('input', { class: 'input', type: 'email', value: v.email, disabled: !!u, required: true, autocomplete: 'off' });
   const nome = h('input', { class: 'input', value: v.nome || '', maxlength: 80 });
-  const ruolo = h('select', { class: 'input', disabled: !!v.protetto }, Object.entries(RUOLI).map(([k, l]) => h('option', { value: k, selected: k === v.ruolo }, l)));
-  const carica = h('input', { type: 'checkbox', checked: !!v.puo_caricare });
-  const modifica = h('input', { type: 'checkbox', checked: !!v.puo_modificare });
+  const ruolo = h('select', { class: 'input', disabled: !!v.protetto }, Object.entries(RUOLI_FORM).map(([k, l]) => h('option', { value: k, selected: k === v.ruolo }, l)));
   const attivo = h('input', { type: 'checkbox', checked: v.attivo !== false, disabled: !!v.protetto });
-  const collabBox = h('div', {},
-    h('label', { class: 'switch' }, h('span', {}, 'Può caricare file'), carica),
-    h('label', { class: 'switch' }, h('span', {}, 'Può modificare i contenuti'), modifica));
-  const syncCollab = () => { collabBox.hidden = ruolo.value !== 'COLLABORATORE'; };
-  ruolo.addEventListener('change', syncCollab); syncCollab();
   const save = h('button', { class: 'btn primary', type: 'submit' }, 'Salva');
   const form = h('form', { novalidate: true, onsubmit: async (e) => {
     e.preventDefault();
     save.disabled = true; err.textContent = '';
     try {
-      await api('utenti.save', { email: email.value, nome: nome.value, ruolo: ruolo.value, puo_caricare: carica.checked, puo_modificare: modifica.checked, attivo: attivo.checked, versione: u ? u.versione : undefined });
+      await api('utenti.save', { email: email.value, nome: nome.value, ruolo: ruolo.value, attivo: attivo.checked, versione: u ? u.versione : undefined });
       dlg.close(); toast('Utente salvato'); reload();
     } catch (x) { err.textContent = x.message; save.disabled = false; }
   } },
@@ -74,9 +67,8 @@ function userForm(u, reload) {
   h('label', { class: 'field' }, h('span', {}, 'Email'), email),
   h('label', { class: 'field' }, h('span', {}, 'Nome'), nome),
   h('label', { class: 'field' }, h('span', {}, 'Ruolo'), ruolo),
-  collabBox,
   h('label', { class: 'switch' }, h('span', {}, 'Accesso attivo'), attivo),
-  v.protetto ? h('p', { class: 'help' }, 'Amministratore principale: ruolo e accesso non modificabili.') : h('p', { class: 'help' }, 'Se riduci i permessi o disattivi l\'accesso, la persona viene disconnessa subito.'),
+  v.protetto ? h('p', { class: 'help' }, 'Owner: ruolo e accesso non modificabili.') : h('p', { class: 'help' }, 'Il ruolo Owner non si assegna: è solo del proprietario. Se riduci i permessi o disattivi l\'accesso, la persona viene disconnessa subito.'),
   err,
   h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', onclick: () => dlg.close() }, 'Annulla'), save));
   const dlg = sheet(form);

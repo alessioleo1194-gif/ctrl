@@ -104,7 +104,7 @@ test('permessi: la lettura legge ma non salva né crea la produzione', () => {
   const env = boot();
   const p = assicura(env);
   ok(salvaDoc(env, p.id, 'plan', '0', PLAN()));
-  const lett = utente(env, 'tecnico@example.com', 'LETTURA');
+  const lett = utente(env, 'tecnico@example.com', 'VIEWER');
   assert.equal(ok(get(env, p.id, 'plan', lett)).dati.crew.length, 1);
   assert.equal(ok(get(env, p.id, 'plan', lett)).permessi.modificare, false);
   assert.equal(salvaDoc(env, p.id, 'plan', '1', PLAN(), lett).ok, false);
@@ -258,7 +258,7 @@ test('PDF: rifiuta nome sbagliato, file non PDF, tipo/produzione inesistenti e c
   assert.equal(salvaPdf(env, p.id, 'plan', NOME_P(), '').error.code, 'INVALID');
   assert.equal(salvaPdf(env, p.id, 'boh', NOME_P()).error.code, 'INVALID');
   assert.equal(salvaPdf(env, 'prj_inesistente', 'plan', NOME_P()).error.code, 'NOT_FOUND');
-  const lett = utente(env, 'lettore@example.com', 'LETTURA');
+  const lett = utente(env, 'lettore@example.com', 'VIEWER');
   assert.equal(salvaPdf(env, p.id, 'plan', NOME_P(), PDF_B64(), lett).error.code, 'FORBIDDEN');
   env.state.driveFail = true;
   assert.equal(salvaPdf(env, p.id, 'plan', NOME_P()).ok, false);

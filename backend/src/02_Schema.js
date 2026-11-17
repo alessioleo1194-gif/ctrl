@@ -47,7 +47,9 @@ var SCHEMA = {
   config: ['chiave', 'valore', 'aggiornato_il']
 };
 
-var RUOLI = ['ADMIN', 'COLLABORATORE', 'LETTURA'];
+// OWNER è solo l'email in ADMIN_EMAIL e non si assegna dal portale.
+var RUOLI = ['OWNER', 'PRODUCTION', 'VIEWER'];
+var RUOLI_ASSEGNABILI = ['PRODUCTION', 'VIEWER'];
 var STATI_EVENTO = ['attivo', 'annullato', 'archiviato'];
 
 var LISTE_DEFAULT = {

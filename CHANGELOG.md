@@ -1,5 +1,15 @@
 # Registro delle modifiche
 
+## 0.7.0 · Ruoli OWNER / PRODUCTION / VIEWER (17/11/2026) · Fase 1 di 4
+
+- Ruoli nuovi, applicati dal server: **OWNER** (solo l'email `ADMIN_EMAIL`, non si assegna a nessuno e non si può declassare),
+  **PRODUCTION** (vede tutto, scarica PDF, carica file, crea e modifica Production Plan e Material List),
+  **VIEWER** (sola lettura). Eventi, impostazioni, utenti, template, sincronizzazione e storico restano solo dell'Owner.
+- Gestione utenti: ruolo a scelta tra Production e Viewer, Owner mostrato e non modificabile; tolti i due interruttori "carica" e "modifica".
+- Migrazione: il setup riscrive i ruoli vecchi (altri ADMIN e COLLABORATORE con modifica → Production, gli altri → Viewer) e
+  disconnette chi perde permessi. Fino al setup i ruoli vecchi sono già letti come i nuovi. **Dopo aver aggiornato Apps Script, rilancia `setupProduzione` / `setupTest`.**
+- Le colonne `puo_caricare` / `puo_modificare` restano nel foglio ma non contano più.
+
 ## 0.6.0 · PDF archiviato al salvataggio (17/11/2026)
 
 - **Save Changes** su Production Plan e Material List salva il documento e genera il PDF, archiviato come file dell'evento

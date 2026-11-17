@@ -67,7 +67,7 @@ test('auth: codice corretto apre una sessione e salva solo l\'hash del token', (
   assert.notEqual(sess[1][0], token);
   const me = call(env.ctx, 'auth.me', {}, token);
   assert.equal(me.ok, true);
-  assert.equal(me.data.ruolo, 'ADMIN');
+  assert.equal(me.data.ruolo, 'OWNER');
   assert.equal(me.data.permessi.impostazioni, true);
 });
 
@@ -112,11 +112,11 @@ test('logout chiude la sessione', () => {
   assert.equal(call(env.ctx, 'auth.me', {}, t).error.code, 'AUTH_REQUIRED');
 });
 
-test('permessi: LETTURA e COLLABORATORE non possono creare eventi né gestire utenti', () => {
+test('permessi: Production e Viewer non possono creare eventi né gestire utenti; Production scrive, Viewer no', () => {
   const env = boot();
   const admin = login(env);
-  addUser(env, admin, { email: 'lettore@example.com', nome: 'L', ruolo: 'LETTURA' });
-  addUser(env, admin, { email: 'collab@example.com', nome: 'C', ruolo: 'COLLABORATORE', puo_caricare: true, puo_modificare: false });
+  addUser(env, admin, { email: 'lettore@example.com', nome: 'L', ruolo: 'VIEWER' });
+  addUser(env, admin, { email: 'collab@example.com', nome: 'C', ruolo: 'PRODUCTION' });
   const lett = login(env, 'lettore@example.com');
   const coll = login(env, 'collab@example.com');
   const ev = { titolo: 'Prova', data: isoDay(5) };
@@ -125,22 +125,23 @@ test('permessi: LETTURA e COLLABORATORE non possono creare eventi né gestire ut
   assert.equal(call(env.ctx, 'utenti.list', {}, coll).error.code, 'FORBIDDEN');
   assert.equal(call(env.ctx, 'impostazioni.lista', { lista: 'aree', valori: ['X'] }, coll).error.code, 'FORBIDDEN');
   const me = call(env.ctx, 'auth.me', {}, coll).data;
-  assert.equal(me.permessi.caricare, true);
-  assert.equal(me.permessi.modificare, false);
+  assert.deepEqual([me.ruolo, me.permessi.caricare, me.permessi.modificare, me.permessi.admin, me.permessi.cestinare], ['PRODUCTION', true, true, false, false]);
+  const mv = call(env.ctx, 'auth.me', {}, lett).data;
+  assert.deepEqual([mv.ruolo, mv.permessi.caricare, mv.permessi.modificare, mv.permessi.admin], ['VIEWER', false, false, false]);
   assert.equal(call(env.ctx, 'eventi.list', {}, lett).ok, true);
 });
 
-test('utenti: l\'admin principale non può essere declassato; disattivare chiude le sessioni', () => {
+test('utenti: il proprietario non può essere declassato; disattivare chiude le sessioni', () => {
   const env = boot();
   const admin = login(env);
-  assert.equal(call(env.ctx, 'utenti.save', { email: ADMIN, ruolo: 'LETTURA' }, admin).error.code, 'INVALID');
-  addUser(env, admin, { email: 'x@example.com', ruolo: 'LETTURA' });
+  assert.equal(call(env.ctx, 'utenti.save', { email: ADMIN, ruolo: 'VIEWER' }, admin).error.code, 'INVALID');
+  addUser(env, admin, { email: 'x@example.com', ruolo: 'VIEWER' });
   const tx = login(env, 'x@example.com');
   assert.equal(call(env.ctx, 'auth.me', {}, tx).ok, true);
   const v = call(env.ctx, 'utenti.list', {}, admin).data.find(u => u.email === 'x@example.com').versione;
-  addUser(env, admin, { email: 'x@example.com', ruolo: 'LETTURA', attivo: false, versione: v });
+  addUser(env, admin, { email: 'x@example.com', ruolo: 'VIEWER', attivo: false, versione: v });
   assert.equal(call(env.ctx, 'auth.me', {}, tx).error.code, 'AUTH_REQUIRED');
-  assert.equal(call(env.ctx, 'utenti.save', { email: 'non-email', ruolo: 'LETTURA' }, admin).error.code, 'INVALID');
+  assert.equal(call(env.ctx, 'utenti.save', { email: 'non-email', ruolo: 'VIEWER' }, admin).error.code, 'INVALID');
   assert.equal(call(env.ctx, 'utenti.save', { email: 'y@example.com', ruolo: 'CAPO' }, admin).error.code, 'INVALID');
 });
 
@@ -327,4 +328,62 @@ test('il file unico Codice.gs (quello da incollare) funziona come i sorgenti', a
   assert.equal(r.ok, true);
   assert.equal(r.data.length, 1);
   assert.equal(env.ctx.doGet().getContent().includes('CTRL API'), true);
+});
+
+test('ruoli: OWNER non si assegna a nessuno, nemmeno dal proprietario; ADMIN e vecchi ruoli non si accettano più', () => {
+  const env = boot();
+  const admin = login(env);
+  assert.equal(call(env.ctx, 'utenti.save', { email: 'altro@example.com', ruolo: 'OWNER' }, admin).error.code, 'INVALID');
+  assert.equal(call(env.ctx, 'utenti.save', { email: 'altro@example.com', ruolo: 'ADMIN' }, admin).error.code, 'INVALID');
+  assert.equal(call(env.ctx, 'utenti.save', { email: 'altro@example.com', ruolo: 'COLLABORATORE' }, admin).error.code, 'INVALID');
+  addUser(env, admin, { email: 'prod@example.com', ruolo: 'PRODUCTION' });
+  const prod = login(env, 'prod@example.com');
+  // Production non può gestire utenti, quindi non può farsi Owner né declassare il proprietario
+  assert.equal(call(env.ctx, 'utenti.save', { email: 'prod@example.com', ruolo: 'OWNER' }, prod).error.code, 'FORBIDDEN');
+  assert.equal(call(env.ctx, 'utenti.save', { email: ADMIN, ruolo: 'PRODUCTION' }, prod).error.code, 'FORBIDDEN');
+  const lista = call(env.ctx, 'utenti.list', {}, admin).data;
+  assert.equal(lista.find(u => u.email === ADMIN).ruolo, 'OWNER');
+  assert.equal(lista.find(u => u.email === ADMIN).protetto, true);
+  assert.equal(lista.filter(u => u.ruolo === 'OWNER').length, 1);
+});
+
+test('ruoli: modificare a mano il foglio non fa nessuno Owner; il proprietario resta Owner anche se il foglio dice altro', () => {
+  const env = boot();
+  const admin = login(env);
+  addUser(env, admin, { email: 'x@example.com', ruolo: 'VIEWER' });
+  const sh = env.getSS(DB_PROD).getSheetByName('utenti');
+  const head = sh.rows()[0];
+  const col = (n) => head.indexOf(n) + 1;
+  const riga = (e) => sh.rows().findIndex(r => r[head.indexOf('email')] === e) + 1;
+  sh.getRange(riga('x@example.com'), col('ruolo')).setValue('OWNER');
+  sh.getRange(riga('x@example.com'), col('puo_modificare')).setValue('TRUE');
+  env.ctx.Db.clearCache();
+  const tx = login(env, 'x@example.com');
+  const me = call(env.ctx, 'auth.me', {}, tx).data;
+  assert.equal(me.ruolo, 'VIEWER');
+  assert.equal(me.permessi.admin, false);
+  assert.equal(call(env.ctx, 'utenti.list', {}, tx).error.code, 'FORBIDDEN');
+  sh.getRange(riga(ADMIN), col('ruolo')).setValue('VIEWER');
+  env.ctx.Db.clearCache();
+  assert.equal(call(env.ctx, 'auth.me', {}, admin).data.ruolo, 'OWNER');
+});
+
+test('ruoli: il setup migra ADMIN / COLLABORATORE / LETTURA, disconnette chi perde permessi ed è ripetibile', () => {
+  const env = boot();
+  const admin = login(env);
+  for (const [email, ruolo, rw] of [['a2@example.com', 'ADMIN', 'TRUE'], ['c1@example.com', 'COLLABORATORE', 'TRUE'], ['c2@example.com', 'COLLABORATORE', 'FALSE'], ['l1@example.com', 'LETTURA', 'FALSE']]) {
+    env.ctx.Db.withLock(() => env.ctx.Db.insert('utenti', { id: 'usr_' + email, email, nome: email, ruolo, puo_caricare: rw, puo_modificare: rw, attivo: 'TRUE', creato_il: '2026-01-01T00:00:00', aggiornato_il: '2026-01-01T00:00:00', versione: '1' }));
+  }
+  env.ctx.Db.clearCache();
+  // letti come i nuovi anche prima della migrazione
+  const t2 = login(env, 'a2@example.com');
+  const me = call(env.ctx, 'auth.me', {}, t2).data;
+  assert.deepEqual([me.ruolo, me.permessi.admin, me.permessi.modificare], ['PRODUCTION', false, true]);
+  const r = env.ctx.setupProduzione();
+  assert.ok(r.some(l => /a2@example.com: ADMIN → PRODUCTION/.test(l)), r.join('\n'));
+  const by = Object.fromEntries(call(env.ctx, 'utenti.list', {}, admin).data.map(u => [u.email, u.ruolo]));
+  assert.deepEqual([by['a2@example.com'], by['c1@example.com'], by['c2@example.com'], by['l1@example.com'], by[ADMIN]], ['PRODUCTION', 'PRODUCTION', 'VIEWER', 'VIEWER', 'OWNER']);
+  assert.equal(call(env.ctx, 'auth.me', {}, t2).error.code, 'AUTH_REQUIRED', 'l\'ex admin viene disconnesso');
+  const r2 = env.ctx.setupProduzione();
+  assert.equal(r2.filter(l => /^Ruolo /.test(l)).length, 0, 'seconda esecuzione: nulla da migrare');
 });

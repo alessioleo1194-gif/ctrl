@@ -42,10 +42,10 @@ const ok = (r) => { assert.equal(r.ok, true, JSON.stringify(r)); return r.data; 
 const rows = (env, name) => env.getSS(DB).getSheetByName(name).rows();
 const b64 = (s) => Buffer.from(s).toString('base64');
 
-test('permessi: la lettura vede e scarica ma non carica; il collaboratore con "può caricare" carica', () => {
+test('permessi: il Viewer vede e scarica ma non carica; Production carica', () => {
   const env = boot();
-  const lett = utente(env, 'tecnico@example.com', 'LETTURA');
-  const coll = utente(env, 'collab@example.com', 'COLLABORATORE', { puo_caricare: true, puo_modificare: false });
+  const lett = utente(env, 'tecnico@example.com', 'VIEWER');
+  const coll = utente(env, 'collab@example.com', 'PRODUCTION');
   const file = { evento_id: env.ev.id, sezione: 'scheda', nome: 'rider.pdf', mime: 'application/pdf', dati: b64('%PDF-1.4 test') };
   assert.equal(call(env.ctx, 'allegati.carica', file, lett).error.code, 'FORBIDDEN');
   ok(call(env.ctx, 'allegati.carica', file, coll));
@@ -98,8 +98,8 @@ test('allegati: file vuoto, troppo grande, non base64, mime strano, Drive in err
 
 test('allegati: si tolgono nel cestino di Drive; solo admin o chi ha caricato', () => {
   const env = boot();
-  const c1 = utente(env, 'c1@example.com', 'COLLABORATORE', { puo_caricare: true });
-  const c2 = utente(env, 'c2@example.com', 'COLLABORATORE', { puo_caricare: true });
+  const c1 = utente(env, 'c1@example.com', 'PRODUCTION');
+  const c2 = utente(env, 'c2@example.com', 'PRODUCTION');
   const s = ok(call(env.ctx, 'allegati.carica', { evento_id: env.ev.id, sezione: 'scheda', nome: 'rider.pdf', mime: 'application/pdf', dati: b64('r') }, c1));
   const id = s.allegati[0].id;
   assert.equal(call(env.ctx, 'allegati.elimina', { id }, c2).error.code, 'FORBIDDEN');

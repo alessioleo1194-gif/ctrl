@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.6.0
+ * CTRL API · versione 0.7.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.6.0';
+var CTRL_VERSION = '0.7.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -220,7 +220,9 @@ var SCHEMA = {
   config: ['chiave', 'valore', 'aggiornato_il']
 };
 
-var RUOLI = ['ADMIN', 'COLLABORATORE', 'LETTURA'];
+// OWNER è solo l'email in ADMIN_EMAIL e non si assegna dal portale.
+var RUOLI = ['OWNER', 'PRODUCTION', 'VIEWER'];
+var RUOLI_ASSEGNABILI = ['PRODUCTION', 'VIEWER'];
 var STATI_EVENTO = ['attivo', 'annullato', 'archiviato'];
 
 var LISTE_DEFAULT = {
@@ -546,34 +548,49 @@ var Auth = (function () {
  * CTRL · Utenti e permessi.
  *
  * Ruoli:
- * - ADMIN: tutto. L'email in ADMIN_EMAIL è sempre admin, anche se il foglio viene modificato.
- * - COLLABORATORE: legge tutto; carica file se puo_caricare; modifica contenuti se puo_modificare.
- * - LETTURA: legge e scarica.
+ * - OWNER: tutto. È solo l'email in ADMIN_EMAIL (proprietà dello script) e resta tale anche se il foglio viene modificato.
+ *   Non si assegna dal portale: nessun altro può diventarlo.
+ * - PRODUCTION: vede tutto, scarica i PDF, carica file, crea e modifica Production Plan e Material List.
+ * - VIEWER: vede e scarica, non modifica nulla.
+ * I valori vecchi nel foglio (ADMIN, COLLABORATORE, LETTURA) vengono letti come i nuovi: ADMIN diverso dal proprietario
+ * vale PRODUCTION, COLLABORATORE con puo_modificare vale PRODUCTION, gli altri VIEWER. Il setup li riscrive.
  */
 var Users = (function () {
   function adminEmail() { return Util.normEmail(Config.get('ADMIN_EMAIL', '')); }
+
+  /** Ruolo effettivo di una riga utente: il proprietario è sempre OWNER, nessun altro lo è mai. */
+  function ruoloDi(u) {
+    if (!u) return 'VIEWER';
+    if (Util.normEmail(u.email) === adminEmail()) return 'OWNER';
+    var r = String(u.ruolo || '').toUpperCase();
+    if (r === 'PRODUCTION' || r === 'VIEWER') return r;
+    if (r === 'ADMIN') return 'PRODUCTION';
+    if (r === 'COLLABORATORE') return Util.bool(u.puo_modificare) ? 'PRODUCTION' : 'VIEWER';
+    return 'VIEWER';
+  }
 
   function byEmail(email) {
     var e = Util.normEmail(email);
     var u = Db.find('utenti', 'email', e);
     if (!u && e && e === adminEmail()) {
-      return { id: 'usr_admin', email: e, nome: 'Admin', ruolo: 'ADMIN', puo_caricare: 'TRUE', puo_modificare: 'TRUE', attivo: 'TRUE' };
+      return { id: 'usr_admin', email: e, nome: 'Owner', ruolo: 'OWNER', attivo: 'TRUE' };
     }
-    if (u && e === adminEmail()) {
+    if (u) {
       u = JSON.parse(JSON.stringify(u));
-      u.ruolo = 'ADMIN'; u.attivo = 'TRUE';
+      u.ruolo = ruoloDi(u);
+      if (e === adminEmail()) u.attivo = 'TRUE';
     }
     return u;
   }
 
   function perms(u) {
-    var admin = u.ruolo === 'ADMIN';
-    var collab = u.ruolo === 'COLLABORATORE';
+    var admin = u.ruolo === 'OWNER';
+    var prod = u.ruolo === 'PRODUCTION';
     return {
       admin: admin,
       vedere: true,
-      caricare: admin || (collab && Util.bool(u.puo_caricare)),
-      modificare: admin || (collab && Util.bool(u.puo_modificare)),
+      caricare: admin || prod,
+      modificare: admin || prod,
       creareEventi: admin,
       condividere: admin,
       cestinare: admin,
@@ -604,9 +621,8 @@ var Users = (function () {
     require_(actor, 'impostazioni');
     return Db.all('utenti').map(function (u) {
       return {
-        id: u.id, email: u.email, nome: u.nome, ruolo: u.email === adminEmail() ? 'ADMIN' : u.ruolo,
-        puo_caricare: Util.bool(u.puo_caricare), puo_modificare: Util.bool(u.puo_modificare),
-        attivo: Util.bool(u.attivo), ultimo_accesso: u.ultimo_accesso, versione: u.versione,
+        id: u.id, email: u.email, nome: u.nome, ruolo: ruoloDi(u),
+        attivo: Util.bool(u.attivo) || u.email === adminEmail(), ultimo_accesso: u.ultimo_accesso, versione: u.versione,
         protetto: u.email === adminEmail()
       };
     }).sort(function (a, b) { return a.email < b.email ? -1 : 1; });
@@ -618,17 +634,20 @@ var Users = (function () {
     var email = Util.normEmail(p.email);
     if (!Util.isEmail(email)) throw new CtrlError('INVALID', 'Email non valida');
     var ruolo = String(p.ruolo || '').toUpperCase();
-    if (RUOLI.indexOf(ruolo) < 0) throw new CtrlError('INVALID', 'Ruolo non valido');
     var isAdminMail = email === adminEmail();
-    if (isAdminMail && (ruolo !== 'ADMIN' || p.attivo === false)) {
-      throw new CtrlError('INVALID', 'L\'amministratore principale non può essere declassato o disattivato');
+    if (isAdminMail) {
+      if (ruolo !== 'OWNER' || p.attivo === false) throw new CtrlError('INVALID', 'Il proprietario non può essere declassato o disattivato');
+    } else if (ruolo === 'OWNER') {
+      throw new CtrlError('INVALID', 'Il ruolo OWNER è riservato al proprietario di CTRL');
+    } else if (RUOLI_ASSEGNABILI.indexOf(ruolo) < 0) {
+      throw new CtrlError('INVALID', 'Ruolo non valido');
     }
     var fields = {
       email: email,
       nome: Util.text(p.nome, 80),
       ruolo: ruolo,
-      puo_caricare: ruolo === 'ADMIN' || (ruolo === 'COLLABORATORE' && !!p.puo_caricare) ? 'TRUE' : 'FALSE',
-      puo_modificare: ruolo === 'ADMIN' || (ruolo === 'COLLABORATORE' && !!p.puo_modificare) ? 'TRUE' : 'FALSE',
+      puo_caricare: ruolo === 'VIEWER' ? 'FALSE' : 'TRUE',
+      puo_modificare: ruolo === 'VIEWER' ? 'FALSE' : 'TRUE',
       attivo: p.attivo === false ? 'FALSE' : 'TRUE',
       aggiornato_il: Util.nowIso()
     };
@@ -638,10 +657,10 @@ var Users = (function () {
       if (existing) {
         var before = JSON.parse(JSON.stringify(existing));
         out = Db.update('utenti', 'email', email, fields, p.versione);
-        var d = Storico.diff(before, out, ['nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo']);
+        var d = Storico.diff(before, out, ['nome', 'ruolo', 'attivo']);
         if (d.changed) Storico.log(actor.email, '', 'utenti', 'modifica', email, d.prima, d.dopo);
         var lostAccess = before.attivo !== out.attivo && out.attivo === 'FALSE';
-        var demoted = before.ruolo !== out.ruolo || before.puo_modificare !== out.puo_modificare || before.puo_caricare !== out.puo_caricare;
+        var demoted = ruoloDi(before) !== ruoloDi(out);
         if (lostAccess || demoted) Auth.revokeAll(email);
       } else {
         fields.id = Util.newId('usr');
@@ -655,7 +674,7 @@ var Users = (function () {
   }
 
   return {
-    byEmail: byEmail, perms: perms, can: can, require: require_, publicProfile: publicProfile,
+    byEmail: byEmail, ruoloDi: ruoloDi, perms: perms, can: can, require: require_, publicProfile: publicProfile,
     touchLogin: touchLogin, list: list, save: save, adminEmail: adminEmail
   };
 })();
@@ -1612,11 +1631,12 @@ function setup_(env) {
   Db.clearCache();
   if (!Db.find('utenti', 'email', props.ADMIN_EMAIL)) {
     Db.insert('utenti', {
-      id: Util.newId('usr'), email: props.ADMIN_EMAIL, nome: 'Admin', ruolo: 'ADMIN', puo_caricare: 'TRUE',
+      id: Util.newId('usr'), email: props.ADMIN_EMAIL, nome: 'Admin', ruolo: 'OWNER', puo_caricare: 'TRUE',
       puo_modificare: 'TRUE', attivo: 'TRUE', creato_il: Util.nowIso(), aggiornato_il: Util.nowIso(), versione: '1'
     });
-    log.push('Creato amministratore ' + props.ADMIN_EMAIL);
+    log.push('Creato proprietario ' + props.ADMIN_EMAIL);
   }
+  migraRuoli_(log);
   if (!Settings.getRaw('schema_versione')) Settings.setRaw('schema_versione', String(SCHEMA_VERSION));
 
   installTriggers_();
@@ -1627,6 +1647,25 @@ function setup_(env) {
 
   console.log(log.join('\n'));
   return log;
+}
+
+/**
+ * Riscrive i ruoli vecchi (ADMIN, COLLABORATORE, LETTURA) in OWNER / PRODUCTION / VIEWER.
+ * Idempotente. Chi perde permessi (altri ADMIN) viene disconnesso. Il proprietario è solo ADMIN_EMAIL.
+ */
+function migraRuoli_(log) {
+  Db.clearCache();
+  Db.all('utenti').forEach(function (u) {
+    var nuovo = Users.ruoloDi(u);
+    var daScrivere = u.ruolo !== nuovo;
+    if (!daScrivere) return;
+    var prima = JSON.parse(JSON.stringify(u));
+    var rw = nuovo === 'VIEWER' ? 'FALSE' : 'TRUE';
+    Db.update('utenti', 'email', u.email, { ruolo: nuovo, puo_caricare: rw, puo_modificare: rw, aggiornato_il: Util.nowIso() });
+    Storico.log('setup', '', 'utenti', 'ruolo_migrato', u.email, prima.ruolo, nuovo);
+    if (String(prima.ruolo).toUpperCase() === 'ADMIN' && nuovo !== 'OWNER') Auth.revokeAll(u.email);
+    log.push('Ruolo ' + u.email + ': ' + prima.ruolo + ' → ' + nuovo);
+  });
 }
 
 function installTriggers_() {
