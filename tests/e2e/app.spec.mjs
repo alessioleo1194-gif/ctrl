@@ -183,9 +183,20 @@ test('utente in sola lettura: niente creazione, niente impostazioni, note non mo
   await expect(page.locator('.fab')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Nuovo evento' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Impostazioni' })).toHaveCount(0);
+  // non assegnato a nulla: elenco vuoto, nessun nome di evento, nessun filtro "Solo i miei"
+  await expect(page.getByText('Non sei assegnato a nessun evento in programma.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Solo i miei' })).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText('Convegno Museo Castromediano');
+  const idConv = apiCall(env, tok, 'eventi.list', {}).data.find(e => e.titolo.startsWith('Convegno')).id;
+  await page.goto('/#/e/' + idConv);
+  await expect(page.getByText('Evento non trovato')).toBeVisible();
+  // assegnato: vede solo quell'evento, in sola lettura
+  apiCall(env, tok, 'staff.gestisci', { evento_id: idConv, azione: 'aggiungi', email: 'tecnico@example.com' });
+  await page.goto('/#/');
+  await page.reload();
   await page.getByText('Convegno Museo Castromediano').click();
   await expect(page.getByLabel('Note di produzione')).toHaveCount(0);
-  await expect(page.locator('#riservato')).toContainText('Non sei nello staff di questo evento');
+  await expect(page.getByText('Cantelmo: Maria Mazzotta')).toHaveCount(0);
   await page.goto('/#/impostazioni');
   await expect(page.getByRole('heading', { name: 'Impostazioni' })).toHaveCount(0);
 });

@@ -121,8 +121,8 @@ test('conferma, scarta, ripristina, rimuovi, aggiungi: stati, storico e card', (
   assert.match(c.staff[0].colore, /^(blu|verde|arancio|viola|rosa|turchese|giallo|rosso)$/);
   assert.equal(c.mio, true);
   assert.equal(c.accesso, true);
-  assert.equal(ev(env, 'Cantelmo', t.luca).mio, false);
-  assert.equal(ev(env, 'Cantelmo', t.luca).staff.length, 1, 'i nomi sulle card li vedono tutti');
+  assert.equal(ev(env, 'Cantelmo', t.giulia).mio, false);
+  assert.equal(ev(env, 'Cantelmo', t.giulia).staff.length, 1, 'i nomi sulle card li vedono Owner e Production');
   assert.equal(ev(env, 'Cantelmo').da_confermare, 0);
 
   // ripristina: lo scartato torna proposta (il nome è ancora nella descrizione)
@@ -246,7 +246,7 @@ test('eventi manuali: la descrizione scritta in CTRL genera proposte', () => {
   assert.deepEqual(ok(call(env.ctx, 'staff.evento', { evento_id: e.id }, env.token)).proposte, []);
 });
 
-test('riservato: chi non è assegnato vede l\'evento ma non note, file, documenti; tutti vedono tutti gli eventi', () => {
+test('riservato: Production non assegnato vede l\'evento ma non note, file, documenti; il Viewer non lo vede proprio', () => {
   const env = boot();
   const t = squadra(env);
   const e = ev(env, 'Cantelmo');
@@ -256,8 +256,11 @@ test('riservato: chi non è assegnato vede l\'evento ma non note, file, document
   const pr = ok(call(env.ctx, 'produzione.assicura', { evento_id: e.id }, env.token));
   ok(call(env.ctx, 'documento.salva', { produzione_id: pr.id, tipo: 'plan', versione: '0', dati: { crew: [{ nome: 'Rossi' }], giorni: [] } }, env.token));
 
-  for (const token of [t.marco, t.luca]) {
-    assert.equal(eventi(env, token).length, 4, 'tutti vedono tutti gli eventi');
+  // il Viewer non assegnato non vede nulla: né nell'elenco né aprendo l'evento
+  assert.equal(eventi(env, t.luca).length, 0);
+  assert.equal(call(env.ctx, 'eventi.get', { id: e.id }, t.luca).error.code, 'NOT_FOUND');
+  for (const token of [t.marco]) {
+    assert.equal(eventi(env, token).length, 4, 'Production vede tutti gli eventi');
     const l = ev(env, 'Cantelmo', token);
     assert.equal(l.note, '', 'le note non escono nemmeno dalla lista');
     assert.equal(l.accesso, false);

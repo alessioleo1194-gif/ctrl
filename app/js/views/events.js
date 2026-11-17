@@ -55,7 +55,7 @@ export function renderList(pane, selectedId) {
   function draw() {
     const evs = filtered();
     if (!evs.length) {
-      listBox.replaceChildren(h('div', { class: 'empty' }, store.q ? 'Nessun evento corrisponde alla ricerca.' : store.mine ? 'Non sei assegnato a nessun evento in questo elenco.' : store.filter === 'prossimi' ? 'Nessun evento in programma.' : 'Nessun evento passato.'));
+      listBox.replaceChildren(h('div', { class: 'empty' }, store.q ? 'Nessun evento corrisponde alla ricerca.' : !store.user.permessi.vedereEventi ? (store.filter === 'prossimi' ? 'Non sei assegnato a nessun evento in programma.' : 'Nessun evento passato a cui sei stato assegnato.') : store.mine ? 'Non sei assegnato a nessun evento in questo elenco.' : store.filter === 'prossimi' ? 'Nessun evento in programma.' : 'Nessun evento passato.'));
       return;
     }
     const out = [];
@@ -85,7 +85,7 @@ export function renderList(pane, selectedId) {
 
   const head = h('div', { class: 'list-head' },
     h('div', { class: 'list-tools' },
-      seg, mine, h('span', { class: 'grow' }),
+      seg, store.user.permessi.vedereEventi ? mine : null, h('span', { class: 'grow' }),
       store.user.permessi.creareEventi ? h('button', { class: 'btn primary desk-only', onclick: () => openEventForm(null) }, icon('plus'), 'Nuovo evento') : null),
     h('div', { class: 'search' }, icon('search'), search));
 

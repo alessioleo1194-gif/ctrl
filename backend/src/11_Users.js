@@ -80,6 +80,7 @@ var Users = (function () {
       caricare: admin || prod || extra.indexOf('carica') >= 0,
       modificare: admin || prod || extra.indexOf('modifica') >= 0,
       vedereTutto: admin || extra.indexOf('tutti_documenti') >= 0,
+      vedereEventi: admin || prod || extra.indexOf('tutti_documenti') >= 0,   // elenco completo degli eventi (il Viewer vede solo i suoi)
       creareEventi: admin,
       condividere: admin,
       cestinare: admin,

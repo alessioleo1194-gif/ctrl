@@ -1,5 +1,17 @@
 # Registro delle modifiche
 
+## 0.10.1 · Il Viewer vede solo i suoi eventi (17/11/2026)
+
+- **Chi ha solo lettura (Viewer) vede soltanto gli eventi a cui è assegnato**, prossimi e passati. Gli altri non compaiono né nell'elenco né per nome né da link diretto
+  ("Evento non trovato"): il blocco è nel server (`eventi.list`, `eventi.get`). Owner e Production vedono tutti gli eventi, passati compresi.
+- Il permesso particolare "Vede i documenti di tutti gli eventi" apre anche l'elenco completo (come un Production, ma resta in sola lettura).
+- Per il Viewer sparisce il filtro "Solo i miei" (inutile) e, senza assegnazioni, l'elenco dice "Non sei assegnato a nessun evento in programma.".
+- Assegnare o togliere un evento vale subito, senza nuovo login. Una proposta dal Calendar non apre nulla finché l'Owner non conferma.
+- Nel festival il Viewer assegnato a un giorno vede solo quel giorno nell'elenco; Plan, Material List e file della produzione restano accessibili come prima.
+- Nuovo permesso nel profilo: `vedereEventi`. Nessuna modifica allo schema: **non serve rilanciare il setup**, basta aggiornare Apps Script.
+- Test: 8 nuovi (`visibilita.test.mjs`), 4 adattati; backend 92, unit 7.
+- La scritta TEST accanto al logo resta sull'anteprima e sul server di prova; sul sito di produzione non compare.
+
 ## 0.10.0 · Gestione utenti completa e telefono (17/11/2026)
 
 - **Utenti**: campo unico "Nome e cognome"; **email modificabile** (stessa riga, stesso colore e assegnazioni, sessioni chiuse, nuovo codice al prossimo accesso;

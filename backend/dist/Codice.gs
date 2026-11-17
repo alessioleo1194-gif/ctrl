@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.10.0
+ * CTRL API · versione 0.10.1
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.10.0';
+var CTRL_VERSION = '0.10.1';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -728,6 +728,7 @@ var Users = (function () {
       caricare: admin || prod || extra.indexOf('carica') >= 0,
       modificare: admin || prod || extra.indexOf('modifica') >= 0,
       vedereTutto: admin || extra.indexOf('tutti_documenti') >= 0,
+      vedereEventi: admin || prod || extra.indexOf('tutti_documenti') >= 0,   // elenco completo degli eventi (il Viewer vede solo i suoi)
       creareEventi: admin,
       condividere: admin,
       cestinare: admin,
@@ -1361,7 +1362,7 @@ var Staff = (function () {
    * e quelli che condividono la stessa produzione.
    */
   function contesto(user) {
-    if (!user || Users.can(user, 'admin')) return { tutto: true, consente: function () { return true; }, produzione: function () { return true; } };
+    if (!user || Users.can(user, 'admin')) return { tutto: true, vede: function () { return true; }, consente: function () { return true; }, produzione: function () { return true; } };
     // permesso particolare "vede tutti i documenti": accesso a ogni evento, ma non è l'Owner (niente proposte da confermare)
     var tuttiDoc = Users.can(user, 'vedereTutto');
     var mie = {}, prod = {};
@@ -1373,8 +1374,12 @@ var Staff = (function () {
       var e = eventi[r.evento_id];
       if (e && e.progetto_id) prod[e.progetto_id] = true;
     });
+    // chi ha solo lettura (VIEWER) vede soltanto gli eventi a cui è assegnato, passati compresi; Production e Owner tutti.
+    // Il permesso "vede i documenti di tutti gli eventi" apre anche l'elenco.
+    var limitato = Users.ruoloDi(user) === 'VIEWER' && !tuttiDoc;
     return {
       tutto: false,
+      vede: function (e) { return !!(e && (!limitato || mie[e.id])); },
       assegnato: function (eventoId) { return !!mie[eventoId]; },
       consente: function (e) { return !!(e && (tuttiDoc || mie[e.id] || (e.progetto_id && prod[e.progetto_id]))); },
       produzione: function (pid) { return tuttiDoc || !!prod[pid]; }
@@ -1384,6 +1389,8 @@ var Staff = (function () {
   var MSG = 'Documenti, file e note sono riservati allo staff assegnato all\'evento';
 
   function puoAccedere(user, e) { return contesto(user).consente(e); }
+  /** Può vedere l'evento (nome, data, luogo)? Il Viewer solo se assegnato. */
+  function puoVedere(user, e) { return contesto(user).vede(e); }
   function richiediEvento(user, e) {
     if (!contesto(user).consente(e)) throw new CtrlError('FORBIDDEN', MSG);
   }
@@ -1411,6 +1418,7 @@ var Staff = (function () {
     var mia = Util.normEmail(user && user.email);
     return {
       accesso: function (e) { return ctx.consente(e); },
+      vede: function (e) { return ctx.vede(e); },
       staff: function (eventoId) {
         return (conf[eventoId] || []).slice().sort(function (a, b) { return a.aggiornata_il < b.aggiornata_il ? -1 : a.aggiornata_il > b.aggiornata_il ? 1 : 0; })
           .map(function (r) {
@@ -1508,7 +1516,7 @@ var Staff = (function () {
   }
 
   return {
-    ricalcola_: ricalcola_, ricalcolaSicuro_: ricalcolaSicuro_, contesto: contesto, puoAccedere: puoAccedere,
+    ricalcola_: ricalcola_, ricalcolaSicuro_: ricalcolaSicuro_, contesto: contesto, puoAccedere: puoAccedere, puoVedere: puoVedere,
     richiediEvento: richiediEvento, richiediProduzione: richiediProduzione, perLista: perLista,
     lista: lista, gestisci: gestisci, alias: alias, MSG: MSG
   };
@@ -1558,6 +1566,7 @@ var Events = (function () {
     var includiArchiviati = !!(p && p.archiviati);
     return Db.all('eventi')
       .filter(function (e) { return includiArchiviati || e.stato !== 'archiviato'; })
+      .filter(function (e) { return st.vede(e); })
       .map(function (e) { return view(e, conteggi, user, st); })
       .sort(function (a, b) {
         var ka = a.data + (a.ora_inizio || '99:99') + a.titolo;
@@ -1569,7 +1578,10 @@ var Events = (function () {
   function get(user, p) {
     var e = Db.find('eventi', 'id', p && p.id);
     if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
-    var out = view(e, contaSezioni(), user, Staff.perLista(user));
+    var st = Staff.perLista(user);
+    // chi non può vedere l'evento riceve la stessa risposta di un evento che non esiste
+    if (!st.vede(e)) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
+    var out = view(e, contaSezioni(), user, st);
     // chi non è nello staff vede l'evento ma non file, documenti e note
     out.allegati = out.accesso ? Allegati.perEvento(e.id) : null;
     out.produzione = out.accesso && e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;

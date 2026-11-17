@@ -29,6 +29,8 @@ In alto compare il badge **TEST** quando si è sull'ambiente di prova.
 - Ruoli: OWNER (solo l'email in `ADMIN_EMAIL`), PRODUCTION (crea e modifica Plan e Material List, carica file),
   VIEWER (sola lettura). Ogni azione controlla i permessi nel backend (`Users.require`). Ogni utente può avere una scadenza
   (`scade_il`); richieste di accesso, registro accessi e dispositivi connessi sono in `13_Accessi.js` e `14_Richieste.js`.
+- Visibilità degli eventi (`Staff.contesto().vede`): Owner e Production vedono tutti gli eventi; il VIEWER solo quelli a cui è assegnato
+  (confermata), passati compresi, salvo il permesso `tutti_documenti` (`vedereEventi`). Un evento non visibile risponde NOT_FOUND.
 - Staff (`15_Staff.js`): chi non è assegnato a un evento ne vede i dati ma non documenti, file e note; il controllo è nel
   backend (`Staff.richiediEvento` / `richiediProduzione`), non solo nell'interfaccia.
 - Cambiare ruolo, email o stato, sospendere o eliminare un utente chiude subito le sue sessioni. L'eliminazione è logica

@@ -142,7 +142,7 @@ var Staff = (function () {
    * e quelli che condividono la stessa produzione.
    */
   function contesto(user) {
-    if (!user || Users.can(user, 'admin')) return { tutto: true, consente: function () { return true; }, produzione: function () { return true; } };
+    if (!user || Users.can(user, 'admin')) return { tutto: true, vede: function () { return true; }, consente: function () { return true; }, produzione: function () { return true; } };
     // permesso particolare "vede tutti i documenti": accesso a ogni evento, ma non è l'Owner (niente proposte da confermare)
     var tuttiDoc = Users.can(user, 'vedereTutto');
     var mie = {}, prod = {};
@@ -154,8 +154,12 @@ var Staff = (function () {
       var e = eventi[r.evento_id];
       if (e && e.progetto_id) prod[e.progetto_id] = true;
     });
+    // chi ha solo lettura (VIEWER) vede soltanto gli eventi a cui è assegnato, passati compresi; Production e Owner tutti.
+    // Il permesso "vede i documenti di tutti gli eventi" apre anche l'elenco.
+    var limitato = Users.ruoloDi(user) === 'VIEWER' && !tuttiDoc;
     return {
       tutto: false,
+      vede: function (e) { return !!(e && (!limitato || mie[e.id])); },
       assegnato: function (eventoId) { return !!mie[eventoId]; },
       consente: function (e) { return !!(e && (tuttiDoc || mie[e.id] || (e.progetto_id && prod[e.progetto_id]))); },
       produzione: function (pid) { return tuttiDoc || !!prod[pid]; }
@@ -165,6 +169,8 @@ var Staff = (function () {
   var MSG = 'Documenti, file e note sono riservati allo staff assegnato all\'evento';
 
   function puoAccedere(user, e) { return contesto(user).consente(e); }
+  /** Può vedere l'evento (nome, data, luogo)? Il Viewer solo se assegnato. */
+  function puoVedere(user, e) { return contesto(user).vede(e); }
   function richiediEvento(user, e) {
     if (!contesto(user).consente(e)) throw new CtrlError('FORBIDDEN', MSG);
   }
@@ -192,6 +198,7 @@ var Staff = (function () {
     var mia = Util.normEmail(user && user.email);
     return {
       accesso: function (e) { return ctx.consente(e); },
+      vede: function (e) { return ctx.vede(e); },
       staff: function (eventoId) {
         return (conf[eventoId] || []).slice().sort(function (a, b) { return a.aggiornata_il < b.aggiornata_il ? -1 : a.aggiornata_il > b.aggiornata_il ? 1 : 0; })
           .map(function (r) {
@@ -289,7 +296,7 @@ var Staff = (function () {
   }
 
   return {
-    ricalcola_: ricalcola_, ricalcolaSicuro_: ricalcolaSicuro_, contesto: contesto, puoAccedere: puoAccedere,
+    ricalcola_: ricalcola_, ricalcolaSicuro_: ricalcolaSicuro_, contesto: contesto, puoAccedere: puoAccedere, puoVedere: puoVedere,
     richiediEvento: richiediEvento, richiediProduzione: richiediProduzione, perLista: perLista,
     lista: lista, gestisci: gestisci, alias: alias, MSG: MSG
   };

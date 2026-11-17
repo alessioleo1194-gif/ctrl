@@ -41,6 +41,7 @@ var Events = (function () {
     var includiArchiviati = !!(p && p.archiviati);
     return Db.all('eventi')
       .filter(function (e) { return includiArchiviati || e.stato !== 'archiviato'; })
+      .filter(function (e) { return st.vede(e); })
       .map(function (e) { return view(e, conteggi, user, st); })
       .sort(function (a, b) {
         var ka = a.data + (a.ora_inizio || '99:99') + a.titolo;
@@ -52,7 +53,10 @@ var Events = (function () {
   function get(user, p) {
     var e = Db.find('eventi', 'id', p && p.id);
     if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
-    var out = view(e, contaSezioni(), user, Staff.perLista(user));
+    var st = Staff.perLista(user);
+    // chi non può vedere l'evento riceve la stessa risposta di un evento che non esiste
+    if (!st.vede(e)) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
+    var out = view(e, contaSezioni(), user, st);
     // chi non è nello staff vede l'evento ma non file, documenti e note
     out.allegati = out.accesso ? Allegati.perEvento(e.id) : null;
     out.produzione = out.accesso && e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;

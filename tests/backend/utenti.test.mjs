@@ -216,9 +216,11 @@ test('permessi particolari: "vede tutti i documenti" apre documenti e file di og
   const env = boot();
   ok(salva(env, { email: 'v@example.com', nome: 'V', ruolo: 'VIEWER' }));
   const tok = login(env, 'v@example.com');
-  const e = eventi(env, tok).find(x => x.titolo.startsWith('Convegno'));
-  assert.equal(e.accesso, false);
+  const e = eventi(env).find(x => x.titolo.startsWith('Convegno'));
+  assert.equal(eventi(env, tok).length, 0, 'un Viewer non assegnato non vede alcun evento');
+  assert.equal(call(env.ctx, 'eventi.get', { id: e.id }, tok).error.code, 'NOT_FOUND');
   ok(salva(env, { email: 'v@example.com', nome: 'V', ruolo: 'VIEWER', permessi_extra: ['tutti_documenti'] }));
+  assert.equal(eventi(env, tok).length, 2, 'con "vede tutto" vede anche l\'elenco');
   const aperto = eventi(env, tok).find(x => x.titolo.startsWith('Convegno'));
   assert.equal(aperto.accesso, true);
   assert.equal(ok(call(env.ctx, 'eventi.get', { id: e.id }, tok)).allegati !== null, true);
@@ -233,7 +235,8 @@ test('permessi particolari: "vede tutti i documenti" apre documenti e file di og
   assert.equal(pr.permessi.admin, false);
   // tolto: l'evento torna riservato
   ok(salva(env, { email: 'v@example.com', nome: 'V', ruolo: 'VIEWER', permessi_extra: [] }));
-  assert.equal(eventi(env, tok).find(x => x.titolo.startsWith('Convegno')).accesso, false);
+  assert.equal(eventi(env, tok).length, 0, 'tolto il permesso, torna l\'elenco vuoto');
+  assert.equal(call(env.ctx, 'eventi.get', { id: e.id }, tok).error.code, 'NOT_FOUND');
 });
 
 test('permessi particolari: valori non validi rifiutati, l\'Owner non ne ha, le modifiche sono registrate, senza campo restano come sono', () => {
