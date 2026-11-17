@@ -40,6 +40,9 @@ var ACTIONS = {
   'utenti.sessioni': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.sessionsOf(Util.normEmail(p.email)); } },
   'utenti.disconnetti': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.revoke(u, Util.normEmail(p.email), p.id); } },
 
+  'staff.evento': { fn: function (u, p) { return Staff.lista(u, p); } },
+  'staff.gestisci': { fn: function (u, p) { return Staff.gestisci(u, p); } },
+
   'accesso.richieste': { fn: function (u) { return Richieste.lista(u); } },
   'accesso.gestisci': { fn: function (u, p) { return Richieste.gestisci(u, p); } },
   'accessi.list': { fn: function (u, p) { return Accessi.list(u, p); } }

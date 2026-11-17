@@ -4,6 +4,8 @@ import { store, navigate, upsertEvent } from '../app.js';
 import { dateRange, timeRange, stamp } from '../format.js';
 import { openEventForm } from './eventForm.js';
 import { allegatiCard } from './allegati.js';
+import { staffCard } from './staff.js';
+import { nomeTag } from '../persone.js';
 
 /** Dettaglio evento: informazioni, scheda di produzione, file allegati, note. */
 export async function renderEvent(pane, id) {
@@ -46,12 +48,15 @@ function draw(pane, ev) {
         h('dt', {}, 'Orario'), h('dd', { class: 'mono' }, timeRange(ev) || 'Tutto il giorno'),
         h('dt', {}, 'Luogo'), h('dd', {}, ev.luogo ? h('a', { href: mapsUrl, target: '_blank', rel: 'noopener' }, ev.luogo) : '—'),
         h('dt', {}, 'Descrizione'), h('dd', { class: 'pre' }, ev.descrizione || '—'),
+        p.admin ? null : [h('dt', {}, 'Staff'), h('dd', {}, (ev.staff || []).length ? h('div', { class: 'names', style: { marginTop: 0 } }, ev.staff.map(nomeTag)) : '—')],
         ev.origine === 'calendar' ? [h('dt', {}, 'Fonte'), h('dd', { class: 'help' }, 'Titolo, date, orari, luogo e descrizione si modificano dal Google Calendar e si aggiornano qui ogni ora.')] : null)));
 
-  const notes = notesCard(ev, p, (upd) => draw(pane, upd));
-
-  const produzione = produzioneCard(ev, p);
-  const allegati = allegatiCard(ev);
+  // chi non è nello staff vede l'evento ma non documenti, file e note
+  const bloccato = ev.accesso === false;
+  const staff = p.admin ? staffCard(ev) : null;
+  const notes = bloccato ? null : notesCard(ev, p, (upd) => draw(pane, upd));
+  const produzione = bloccato ? bloccatoCard() : produzioneCard(ev, p);
+  const allegati = bloccato ? null : allegatiCard(ev);
 
   const admin = p.admin ? adminCard(ev, pane) : null;
   const histo = p.admin && ev.storico?.length ? h('section', { class: 'card' },
@@ -60,7 +65,20 @@ function draw(pane, ev) {
       h('span', { class: 'mono help' }, stamp(s.ts)),
       h('span', {}, h('b', {}, s.email === 'calendar' ? 'Calendar' : s.email), ' · ', s.azione, s.dopo ? h('span', { class: 'help' }, ' ' + s.dopo.slice(0, 140)) : null))))) : null;
 
-  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, produzione, allegati, notes, admin, histo));
+  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, staff, produzione, allegati, notes, admin, histo));
+}
+
+/** Al posto di documenti, file e note per chi non è assegnato all'evento. */
+function bloccatoCard() {
+  return h('section', { class: 'card prod-card', id: 'riservato' },
+    h('header', {}, h('span', { class: 'label' }, 'Documenti di produzione'), h('span', { class: 'tag' }, 'Riservato')),
+    h('div', { class: 'in', style: { display: 'grid', gap: '12px' } },
+      h('div', { class: 'lock-box' }, h('span', { class: 'ic' }, icon('lock')),
+        h('div', {}, h('b', {}, 'Non sei nello staff di questo evento.'),
+          h('p', { class: 'help', style: { margin: '2px 0 0', fontSize: '13px' } }, 'Production Plan, Material List, schede tecniche, rider e note sono visibili solo a chi è assegnato. Per essere aggiunto chiedilo a chi gestisce CTRL.'))),
+      h('div', { class: 'doc-btns' },
+        h('span', { class: 'doc-btn off' }, h('span', { class: 'doc-ico piano' }, icon('piano')), h('span', { class: 'doc-btn-t' }, h('b', {}, 'Production Plan'), h('span', { class: 'help' }, 'Bloccato'))),
+        h('span', { class: 'doc-btn off' }, h('span', { class: 'doc-ico materiale' }, icon('materiale')), h('span', { class: 'doc-btn-t' }, h('b', {}, 'Material List'), h('span', { class: 'help' }, 'Bloccato'))))));
 }
 
 /**

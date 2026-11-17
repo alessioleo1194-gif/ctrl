@@ -142,7 +142,7 @@ test('impostazioni: utenti, liste a tendina, sincronizzazione', async ({ page },
   await page.getByRole('button', { name: 'Aggiungi utente' }).click();
   const dlg = page.locator('dialog.sheet');
   await dlg.getByLabel('Email').fill('manuel@example.com');
-  await dlg.getByLabel('Nome').fill('Manuel');
+  await dlg.getByLabel('Nome', { exact: true }).fill('Manuel');
   await expect(dlg.getByLabel('Ruolo').locator('option')).toHaveText(['Production · lavora su Plan e Material List', 'Viewer · sola lettura']);
   await dlg.getByLabel('Ruolo').selectOption('PRODUCTION');
   await dlg.getByRole('button', { name: 'Salva' }).click();
@@ -185,7 +185,7 @@ test('utente in sola lettura: niente creazione, niente impostazioni, note non mo
   await expect(page.getByRole('link', { name: 'Impostazioni' })).toHaveCount(0);
   await page.getByText('Convegno Museo Castromediano').click();
   await expect(page.getByLabel('Note di produzione')).toHaveCount(0);
-  await expect(page.getByText('Nessuna nota.')).toBeVisible();
+  await expect(page.locator('#riservato')).toContainText('Non sei nello staff di questo evento');
   await page.goto('/#/impostazioni');
   await expect(page.getByRole('heading', { name: 'Impostazioni' })).toHaveCount(0);
 });
@@ -500,6 +500,7 @@ test('sola lettura: vede i fogli e genera il documento, ma non può scrivere né
   const p = apiCall(env, adm, 'produzione.assicura', { evento_id: evId }).data;
   apiCall(env, adm, 'documento.salva', { produzione_id: p.id, tipo: 'plan', versione: '0', dati: { crew: [], giorni: [{ id: 'g1', data: isoDay(2), righe: [{ id: 'r1', sez: '', ora: '18:00', att: 'Doors Open', loc: '', note: '' }] }] } });
   apiCall(env, adm, 'utenti.save', { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'VIEWER' });
+  apiCall(env, adm, 'staff.gestisci', { evento_id: evId, azione: 'aggiungi', email: 'tecnico@example.com' });
   await login(page, env, 'tecnico@example.com');
   await page.getByText('Cantelmo: Maria Mazzotta').click();
   await page.getByRole('link', { name: /Production Plan/ }).click();
@@ -798,4 +799,113 @@ test('accessi: Production e Viewer non vedono richieste né registro e le azioni
   for (const [azione, payload] of [['accesso.richieste', {}], ['accesso.gestisci', { id: 'x', azione: 'rifiuta' }], ['accessi.list', {}], ['utenti.sessioni', { email: ADMIN }], ['utenti.disconnetti', { email: ADMIN }], ['utenti.proroga', { email: ADMIN, giorni: 7 }]]) {
     expect(JSON.parse(JSON.stringify(apiCall(env, tok, azione, payload))).error.code, azione).toBe('FORBIDDEN');
   }
+});
+
+// ---------------- Staff (Fase 3) ----------------
+
+const calendarioStaff = () => [
+  { id: 'a@google.com', title: 'Cantelmo: Maria Mazzotta', start: romeIso(isoDay(2), '21:00'), end: romeIso(isoDay(2), '23:30'), location: 'Officine Cantelmo, Lecce', description: 'Fonico Luca, referente Sara' },
+  { id: 'b@google.com', title: 'Convegno Museo Castromediano', allDay: true, start: isoDay(5), end: isoDay(8), description: 'Luci: Roberto' },
+  { id: 'c@google.com', title: 'Swing night', allDay: true, start: isoDay(9), end: isoDay(10), description: 'Nessun nome' }
+];
+
+async function esci(page) {
+  await page.getByRole('button', { name: 'Esci' }).click();
+  await expect(page.getByLabel('Email')).toBeVisible();
+}
+
+test('staff: proposte dal calendario, conferma dell\'Owner, nomi colorati sulle card, Solo i miei e documenti riservati', async ({ page }, info) => {
+  const env = await setup(page, { calendarEvents: calendarioStaff() });
+  const adm = tokenFor(env, ADMIN);
+  apiCall(env, adm, 'utenti.save', { email: 'luca@example.com', nome: 'Luca Bianchi', ruolo: 'VIEWER', colore: 'viola' });
+  apiCall(env, adm, 'utenti.save', { email: 'roberto@example.com', nome: 'Roberto Verdi', ruolo: 'PRODUCTION', colore: 'verde' });
+
+  // ---- Owner ----
+  await login(page, env);
+  const cant = page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' });
+  await expect(cant.locator('.tag.warn')).toHaveText('1 da confermare');
+  await expect(page.locator('.ev', { hasText: 'Swing night' }).locator('.names')).toContainText('nessuno staff');
+  await cant.click();
+  const staff = page.locator('#staff');
+  const prop = staff.locator('.staff-prop');
+  await expect(prop).toContainText('Luca Bianchi');
+  await expect(prop.locator('mark')).toHaveText('Luca');
+  // una proposta non conta: nessun nome sulla card
+  await expect(cant.locator('.nm')).toHaveCount(0);
+
+  await prop.getByRole('button', { name: 'Non è lui' }).click();
+  await expect(staff.locator('.staff-prop')).toHaveCount(0);
+  await expect(staff.locator('.staff-scartate')).toContainText('Luca Bianchi');
+  await staff.getByRole('button', { name: 'Ripristina' }).click();
+  await expect(staff.locator('.staff-prop')).toHaveCount(1);
+  await staff.locator('.staff-prop').getByRole('button', { name: 'Conferma' }).click();
+  await expect(staff.locator('.persona.pc-viola')).toContainText('Luca Bianchi');
+  await expect(cant.locator('.nm.pc-viola')).toHaveText('Luca');
+  await expect(cant.locator('.tag.warn')).toHaveCount(0);
+
+  // aggiunta manuale dalla tendina
+  await staff.getByLabel('Aggiungi staff').selectOption({ label: 'Roberto Verdi · Production' });
+  await expect(staff.locator('.persona.pc-verde')).toContainText('manuale');
+  await expect(cant.locator('.nm')).toHaveCount(2);
+  await noHorizontalScroll(page);
+  await page.screenshot({ path: `test-results/staff-owner-${info.project.name}.png`, fullPage: true });
+
+  // ---- Production assegnato (Roberto: Cantelmo a mano, Convegno proposto) ----
+  const conv = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo.startsWith('Convegno')).id;
+  apiCall(env, adm, 'staff.gestisci', { evento_id: conv, azione: 'conferma', email: 'roberto@example.com' });
+  await esci(page);
+  await login(page, env, 'roberto@example.com');
+  await expect(page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).locator('.nm.me')).toHaveText('Roberto');
+  await expect(page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).locator('.nm.pc-viola')).toHaveText('Luca');
+  await expect(page.locator('.ev .tag.warn')).toHaveCount(0);   // le proposte sono solo dell'Owner
+  await expect(page.locator('.ev')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Solo i miei' }).click();
+  await expect(page.locator('.ev')).toHaveCount(2);
+  await expect(page.locator('.ev', { hasText: 'Swing night' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Solo i miei' }).click();
+  await expect(page.locator('.ev')).toHaveCount(3);
+  await page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).click();
+  await expect(page.getByLabel('Note di produzione')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Production Plan/ })).toBeVisible();
+  await expect(page.locator('#riservato')).toHaveCount(0);
+
+  // ---- evento a cui non è assegnato: dati visibili, documenti no ----
+  await page.evaluate(() => { location.hash = '#/'; });   // su telefono la lista si riapre
+  await page.locator('.ev', { hasText: 'Swing night' }).click();
+  await expect(page.getByRole('heading', { name: 'Swing night' })).toBeVisible();
+  await expect(page.locator('#riservato')).toContainText('Non sei nello staff di questo evento');
+  await expect(page.getByLabel('Note di produzione')).toHaveCount(0);
+  await expect(page.locator('#allegati')).toHaveCount(0);
+  await expect(page.locator('#staff')).toHaveCount(0);
+  await expect(page.locator('dl.kv')).toContainText('Nessun nome');
+  await noHorizontalScroll(page);
+  await page.screenshot({ path: `test-results/staff-riservato-${info.project.name}.png`, fullPage: true });
+});
+
+test('staff: alias e colore dell\'utente nelle Impostazioni, anche per le proposte', async ({ page }, info) => {
+  const env = await setup(page, { calendarEvents: calendarioStaff() });
+  await login(page, env);
+  await page.getByRole('link', { name: 'Impostazioni' }).click();
+  await page.getByRole('button', { name: 'Aggiungi utente' }).click();
+  const dlg = page.locator('dialog.sheet');
+  await dlg.getByLabel('Email').fill('sara@example.com');
+  await dlg.getByLabel('Nome', { exact: true }).fill('Alessandra Rossi');
+  await dlg.getByLabel('Nome in calendario').fill('Sara, Sary');
+  await dlg.getByRole('button', { name: 'Rosa' }).click();
+  await dlg.getByRole('button', { name: 'Salva' }).click();
+  const riga = page.locator('.urow', { hasText: 'sara@example.com' });
+  await expect(riga.locator('.dotc')).toBeVisible();
+  await expect(riga.locator('.pc-rosa')).toBeVisible();
+  await page.screenshot({ path: `test-results/staff-impostazioni-${info.project.name}.png`, fullPage: true });
+  await riga.getByRole('button', { name: 'Modifica' }).click();
+  await expect(page.locator('dialog.sheet').getByLabel('Nome in calendario')).toHaveValue('Sara, Sary');
+  await expect(page.locator('dialog.sheet').getByRole('button', { name: 'Rosa' })).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('dialog.sheet').getByRole('button', { name: 'Annulla' }).click();
+
+  // "Sara" è nella descrizione dell'evento: nasce la proposta
+  await page.getByRole('link', { name: 'Eventi', exact: true }).click();
+  await page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).click();
+  await expect(page.locator('#staff .staff-prop')).toContainText('Alessandra Rossi');
+  await expect(page.locator('#staff .staff-prop mark')).toHaveText('Sara');
+  await noHorizontalScroll(page);
 });

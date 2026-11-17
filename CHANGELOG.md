@@ -1,5 +1,21 @@
 # Registro delle modifiche
 
+## 0.9.0 · Staff negli eventi (17/11/2026) · Fase 3 di 4
+
+- **Assegnazione dello staff** (solo Owner): scheda "Staff" nel dettaglio evento con assegnati, proposte e aggiunta manuale.
+  Dalle descrizioni del Calendar nascono **proposte** (cerca il "nome in calendario" di ogni utente, parola intera, senza maiuscole né accenti).
+  Nessuna proposta vale finché l'Owner non la conferma; "Non è lui" la scarta e CTRL se lo ricorda; "Ripristina" la riporta in attesa.
+  Conferme, assegnazioni manuali e scartati non cambiano con la sincronizzazione; una proposta non gestita decade se il nome sparisce.
+- **Documenti riservati**: chi non è assegnato vede l'evento (titolo, data, luogo, descrizione, nomi dello staff) ma non Production Plan,
+  Material List, file e note. Il blocco è nel server, anche chiamando le azioni a mano. Per i festival basta essere assegnati a un evento
+  della produzione. L'Owner vede tutto. Gli eventi li vedono tutti.
+- **Nomi colorati sulle card**: primi due nomi e "+N", colore per persona uguale ovunque; il tuo nome è pieno. L'Owner vede il badge "N da confermare".
+- **Solo i miei**: filtro nella lista eventi.
+- **Impostazioni → Utenti**: campi "Nome in calendario" e "Colore" (8 colori; assegnato in automatico il meno usato, modificabile).
+- Backend: tabella nuova `assegnazioni`, colonne `nome_calendario` e `colore` in `utenti` (schema 6). Azioni nuove: `staff.evento`, `staff.gestisci`.
+  `eventi.list` / `eventi.get` aggiungono `staff`, `mio`, `accesso`, `da_confermare`; le note escono solo per chi ha accesso.
+  **Dopo aver aggiornato Apps Script, rilancia `setupProduzione` / `setupTest`** (crea la tabella, aggiunge le colonne e dà un colore a chi non lo ha).
+
 ## 0.8.0 · Accessi: scadenza, richieste, registro, disconnessione remota (17/11/2026) · Fase 2 di 4
 
 - **Scadenza per utente**: campo "Accesso valido fino al" (ultimo giorno, ora italiana). Dal giorno dopo il login dice "Accesso scaduto",

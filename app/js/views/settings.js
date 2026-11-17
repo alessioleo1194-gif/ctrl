@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { h, icon, sheet, toast, loading } from '../ui.js';
 import { store, loadEvents } from '../app.js';
 import { stamp, dataIt, dateNelTesto, dispositivo } from '../format.js';
+import { COLORI } from '../persone.js';
 
 const RUOLI = { OWNER: 'Owner', PRODUCTION: 'Production', VIEWER: 'Viewer' };
 const RUOLI_FORM = { PRODUCTION: 'Production · lavora su Plan e Material List', VIEWER: 'Viewer · sola lettura' };
@@ -74,7 +75,7 @@ function usersCard(users, reload) {
     const visibili = users.filter(pred);
     list.replaceChildren(...(visibili.length ? visibili.map(u => h('div', { class: 'urow' },
       h('div', { class: 'who' },
-        h('b', {}, u.nome || u.email),
+        h('span', { class: 'pcn pc-' + u.colore }, h('span', { class: 'dotc' }), h('b', {}, u.nome || u.email)),
         h('small', {}, u.email),
         h('div', { class: 'chips' },
           h('span', { class: 'tag' + (u.ruolo === 'OWNER' ? ' owner' : '') }, RUOLI[u.ruolo] || u.ruolo),
@@ -96,26 +97,37 @@ function usersCard(users, reload) {
 }
 
 function userForm(u, reload) {
-  const v = u || { email: '', nome: '', ruolo: 'VIEWER', attivo: true, scade_il: '' };
+  const v = u || { email: '', nome: '', ruolo: 'VIEWER', attivo: true, scade_il: '', nome_calendario: '', colore: '' };
   const err = h('div', { class: 'err', role: 'alert' });
   const email = h('input', { class: 'input', type: 'email', value: v.email, disabled: !!u, required: true, autocomplete: 'off' });
   const nome = h('input', { class: 'input', value: v.nome || '', maxlength: 80 });
   const ruolo = h('select', { class: 'input', disabled: !!v.protetto }, Object.entries(RUOLI_FORM).map(([k, l]) => h('option', { value: k, selected: k === v.ruolo }, l)));
   const attivo = h('input', { type: 'checkbox', checked: v.attivo !== false, disabled: !!v.protetto });
   const scade = h('input', { class: 'input', type: 'date', value: v.scade_il || '', disabled: !!v.protetto });
+  const nomeCal = h('input', { class: 'input', value: v.nome_calendario || '', maxlength: 200, placeholder: 'Es. Marco, M. Serra', autocomplete: 'off' });
+  let colore = v.colore || '';
+  const swatches = h('div', { class: 'swatches', role: 'group', 'aria-label': 'Colore' },
+    COLORI.map(([k, l]) => h('button', { type: 'button', class: 'pc-' + k, title: l, 'aria-label': l, 'aria-pressed': String(k === colore), onclick: () => {
+      colore = k;
+      swatches.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.title === l)));
+    } })));
   const save = h('button', { class: 'btn primary', type: 'submit' }, 'Salva');
   const disp = h('div', { class: 'disp' });
   const form = h('form', { novalidate: true, onsubmit: async (e) => {
     e.preventDefault();
     save.disabled = true; err.textContent = '';
     try {
-      await api('utenti.save', { email: email.value, nome: nome.value, ruolo: ruolo.value, attivo: attivo.checked, scade_il: scade.value, versione: u ? u.versione : undefined });
+      await api('utenti.save', { email: email.value, nome: nome.value, ruolo: ruolo.value, attivo: attivo.checked, scade_il: scade.value, nome_calendario: nomeCal.value, colore: colore || undefined, versione: u ? u.versione : undefined });
       dlg.close(); toast('Utente salvato'); reload();
     } catch (x) { err.textContent = x.message; save.disabled = false; }
   } },
   h('h2', {}, u ? 'Modifica utente' : 'Nuovo utente'),
   h('label', { class: 'field' }, h('span', {}, 'Email'), email),
   h('label', { class: 'field' }, h('span', {}, 'Nome'), nome),
+  h('label', { class: 'field' }, h('span', {}, 'Nome in calendario'), nomeCal),
+  h('p', { class: 'help' }, 'Come ti scrivono nelle descrizioni del Calendar, separati da virgola (es. "Marco, M. Serra"). Serve a proporre lo staff di un evento; vuoto = si prova con il primo nome. Maiuscole e accenti non contano.'),
+  h('div', { class: 'field' }, h('span', {}, 'Colore'), swatches),
+  h('p', { class: 'help' }, u ? 'Il colore con cui compare il nome sulle card degli eventi.' : 'Il colore con cui compare il nome sulle card. Se non scegli, ne viene dato uno automaticamente (il meno usato).'),
   h('label', { class: 'field' }, h('span', {}, 'Ruolo'), ruolo),
   h('label', { class: 'field' }, h('span', {}, 'Accesso valido fino al'), scade),
   h('p', { class: 'help' }, 'Vuoto = nessuna scadenza. L\'accesso termina a fine giornata (ora italiana): il giorno dopo la sessione si chiude e il login dice "Accesso scaduto".'),

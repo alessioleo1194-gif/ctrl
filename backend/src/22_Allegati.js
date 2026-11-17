@@ -68,6 +68,7 @@ var Allegati = (function () {
 
     return Db.withLock(function () {
       var e = evento(p.evento_id);
+      Staff.richiediEvento(user, e);
       var file = cartella(e).createFile(Utilities.newBlob(bytes, mime, nome));
       var row = Db.insert('allegati', {
         id: Util.newId('al'), evento_id: e.id, sezione: p.sezione, drive_id: file.getId(), nome: nome, mime: mime,
@@ -86,6 +87,7 @@ var Allegati = (function () {
 
   function scarica(user, p) {
     var a = trovaAllegato(p && p.id);
+    Staff.richiediEvento(user, evento(a.evento_id));
     var file;
     try { file = DriveApp.getFileById(a.drive_id); } catch (err) { throw new CtrlError('NOT_FOUND', 'Il file non è più su Drive'); }
     if (file.isTrashed && file.isTrashed()) throw new CtrlError('NOT_FOUND', 'Il file è nel cestino di Drive');
@@ -97,6 +99,7 @@ var Allegati = (function () {
     Users.require(user, 'caricare');
     return Db.withLock(function () {
       var a = trovaAllegato(p && p.id);
+      Staff.richiediEvento(user, evento(a.evento_id));
       if (!Users.can(user, 'admin') && a.caricato_da !== user.email) {
         throw new CtrlError('FORBIDDEN', 'Puoi togliere solo i file che hai caricato tu');
       }

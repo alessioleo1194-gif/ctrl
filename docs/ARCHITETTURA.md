@@ -26,8 +26,11 @@ In alto compare il badge **TEST** quando si è sull'ambiente di prova.
 - Accesso con codice di 6 cifre via email: 10 minuti, 5 tentativi, 1 invio al minuto e 5 all'ora per indirizzo.
   La risposta non rivela se un'email è autorizzata.
 - Sessione di 30 giorni. Nel foglio c'è solo l'hash SHA-256 del token.
-- Ruoli: ADMIN (solo l'email in `ADMIN_EMAIL`, sempre admin), COLLABORATORE (interruttori "può caricare file" e
-  "può modificare contenuti"), LETTURA. Ogni azione controlla i permessi nel backend.
+- Ruoli: OWNER (solo l'email in `ADMIN_EMAIL`), PRODUCTION (crea e modifica Plan e Material List, carica file),
+  VIEWER (sola lettura). Ogni azione controlla i permessi nel backend (`Users.require`). Ogni utente può avere una scadenza
+  (`scade_il`); richieste di accesso, registro accessi e dispositivi connessi sono in `13_Accessi.js` e `14_Richieste.js`.
+- Staff (`15_Staff.js`): chi non è assegnato a un evento ne vede i dati ma non documenti, file e note; il controllo è nel
+  backend (`Staff.richiediEvento` / `richiediProduzione`), non solo nell'interfaccia.
 - Cambiare ruolo o disattivare un utente chiude subito le sue sessioni.
 - Errori interni: al frontend arriva solo un messaggio generico, i dettagli restano nel registro di Apps Script.
 - Netlify invia intestazioni di sicurezza (Content-Security-Policy, niente iframe, niente referrer): vedi `netlify.toml`.
@@ -57,13 +60,22 @@ Excel con `tsv.js`, annulla/ripeti, elenchi filtrati); `views/plan.js` e `views/
 Nel Plan la colonna Section vale per tutte le righe sotto finché non ne scrivi un'altra (si parte da Pre Show);
 le righe restano dove le scrivi, "Sort by time" le ordina, il documento è sempre ordinato per orario.
 
+Staff e assegnazioni (`15_Staff.js`, tabella `assegnazioni`): solo l'Owner assegna. Dalla descrizione del Calendar nascono
+**proposte**: CTRL cerca nel testo il "nome in calendario" di ogni utente attivo e non scaduto (`utenti.nome_calendario`,
+alias separati da virgola; se vuoto, il primo nome di almeno 3 lettere), a parola intera, senza maiuscole né accenti.
+Una proposta non dà alcun accesso finché l'Owner non la conferma. Stati: `proposta`, `confermata`, `scartata` ("non è lui",
+ricordata), `rimossa` (tolta a mano), `decaduta` (il nome non c'è più). La sync e le modifiche a utenti ed eventi ricalcolano
+le proposte (`Staff.ricalcola_`) senza toccare conferme, assegnazioni manuali e scartati. Accesso a documenti, file e note:
+Owner sempre; gli altri se assegnati all'evento o a un evento della stessa produzione (festival). Ogni utente ha un colore
+(`utenti.colore`, tavolozza `COLORI_UTENTE`), lo stesso su card, dettaglio e impostazioni.
+
 ## Attività automatiche (trigger Apps Script)
 
 | Funzione | Quando | Cosa fa |
 |---|---|---|
 | `syncOraria` | ogni ora | legge il Calendar da 30 giorni fa a 365 giorni avanti |
 | `backupSettimanale` | lunedì ore 4 | copia il database in `BACKUP/`, ne tiene 8 |
-| `puliziaNotturna` | ogni notte ore 3 | elimina le sessioni scadute |
+| `puliziaNotturna` | ogni notte ore 3 | elimina le sessioni scadute, chiude gli accessi scaduti, pulisce il registro oltre 180 giorni |
 
 ## Limiti noti
 

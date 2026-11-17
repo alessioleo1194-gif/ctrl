@@ -40,12 +40,14 @@ function utente(env, email, ruolo, extra = {}) {
 
 const ok = (r) => { assert.equal(r.ok, true, JSON.stringify(r)); return r.data; };
 const rows = (env, name) => env.getSS(DB).getSheetByName(name).rows();
+const assegna = (env, eventoId, ...emails) => emails.forEach(email => ok(call(env.ctx, 'staff.gestisci', { evento_id: eventoId, azione: 'aggiungi', email }, env.token)));
 const b64 = (s) => Buffer.from(s).toString('base64');
 
 test('permessi: il Viewer vede e scarica ma non carica; Production carica', () => {
   const env = boot();
   const lett = utente(env, 'tecnico@example.com', 'VIEWER');
   const coll = utente(env, 'collab@example.com', 'PRODUCTION');
+  assegna(env, env.ev.id, 'tecnico@example.com', 'collab@example.com');
   const file = { evento_id: env.ev.id, sezione: 'scheda', nome: 'rider.pdf', mime: 'application/pdf', dati: b64('%PDF-1.4 test') };
   assert.equal(call(env.ctx, 'allegati.carica', file, lett).error.code, 'FORBIDDEN');
   ok(call(env.ctx, 'allegati.carica', file, coll));
@@ -100,6 +102,7 @@ test('allegati: si tolgono nel cestino di Drive; solo admin o chi ha caricato', 
   const env = boot();
   const c1 = utente(env, 'c1@example.com', 'PRODUCTION');
   const c2 = utente(env, 'c2@example.com', 'PRODUCTION');
+  assegna(env, env.ev.id, 'c1@example.com', 'c2@example.com');
   const s = ok(call(env.ctx, 'allegati.carica', { evento_id: env.ev.id, sezione: 'scheda', nome: 'rider.pdf', mime: 'application/pdf', dati: b64('r') }, c1));
   const id = s.allegati[0].id;
   assert.equal(call(env.ctx, 'allegati.elimina', { id }, c2).error.code, 'FORBIDDEN');

@@ -6,7 +6,7 @@
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 5;
+var SCHEMA_VERSION = 6;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -39,8 +39,14 @@ var SCHEMA = {
   documenti: ['id', 'progetto_id', 'tipo', 'versione', 'parti', 'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'eliminato'],
   documenti_parti: ['id', 'documento_id', 'n', 'testo'],
   // scade_il: ultimo giorno di accesso (yyyy-MM-dd, ora italiana); vuoto = nessuna scadenza
+  // nome_calendario: come la persona compare nelle descrizioni del Calendar (alias separati da virgola)
+  // colore: uno di COLORI_UTENTE, uguale per la stessa persona ovunque nell'interfaccia
   utenti: ['id', 'email', 'nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo', 'creato_il',
-    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il'],
+    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il', 'nome_calendario', 'colore'],
+  // staff assegnato agli eventi. stato: proposta (da confermare), confermata, scartata, rimossa, decaduta.
+  // origine: calendario (trovato nella descrizione) o manuale. trovato/termine: dove e cosa è stato trovato.
+  assegnazioni: ['id', 'evento_id', 'email', 'stato', 'origine', 'trovato', 'termine', 'creata_il', 'creata_da',
+    'aggiornata_il', 'aggiornata_da'],
   sessioni: ['hash', 'email', 'creata', 'scade', 'ultimo_uso', 'dispositivo'],
   condivisioni: ['id', 'hash', 'eventi', 'sezioni', 'mostra_contatti', 'scade', 'revocato', 'creato_da',
     'creato_il', 'ultimo_accesso', 'etichetta'],
@@ -55,6 +61,7 @@ var SCHEMA = {
 // OWNER è solo l'email in ADMIN_EMAIL e non si assegna dal portale.
 var RUOLI = ['OWNER', 'PRODUCTION', 'VIEWER'];
 var RUOLI_ASSEGNABILI = ['PRODUCTION', 'VIEWER'];
+var COLORI_UTENTE = ['blu', 'verde', 'arancio', 'viola', 'rosa', 'turchese', 'giallo', 'rosso'];
 var STATI_EVENTO = ['attivo', 'annullato', 'archiviato'];
 
 var LISTE_DEFAULT = {

@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.8.0
+ * CTRL API · versione 0.9.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.8.0';
+var CTRL_VERSION = '0.9.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -190,7 +190,7 @@ var Util = (function () {
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 5;
+var SCHEMA_VERSION = 6;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -223,8 +223,14 @@ var SCHEMA = {
   documenti: ['id', 'progetto_id', 'tipo', 'versione', 'parti', 'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'eliminato'],
   documenti_parti: ['id', 'documento_id', 'n', 'testo'],
   // scade_il: ultimo giorno di accesso (yyyy-MM-dd, ora italiana); vuoto = nessuna scadenza
+  // nome_calendario: come la persona compare nelle descrizioni del Calendar (alias separati da virgola)
+  // colore: uno di COLORI_UTENTE, uguale per la stessa persona ovunque nell'interfaccia
   utenti: ['id', 'email', 'nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo', 'creato_il',
-    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il'],
+    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il', 'nome_calendario', 'colore'],
+  // staff assegnato agli eventi. stato: proposta (da confermare), confermata, scartata, rimossa, decaduta.
+  // origine: calendario (trovato nella descrizione) o manuale. trovato/termine: dove e cosa è stato trovato.
+  assegnazioni: ['id', 'evento_id', 'email', 'stato', 'origine', 'trovato', 'termine', 'creata_il', 'creata_da',
+    'aggiornata_il', 'aggiornata_da'],
   sessioni: ['hash', 'email', 'creata', 'scade', 'ultimo_uso', 'dispositivo'],
   condivisioni: ['id', 'hash', 'eventi', 'sezioni', 'mostra_contatti', 'scade', 'revocato', 'creato_da',
     'creato_il', 'ultimo_accesso', 'etichetta'],
@@ -239,6 +245,7 @@ var SCHEMA = {
 // OWNER è solo l'email in ADMIN_EMAIL e non si assegna dal portale.
 var RUOLI = ['OWNER', 'PRODUCTION', 'VIEWER'];
 var RUOLI_ASSEGNABILI = ['PRODUCTION', 'VIEWER'];
+var COLORI_UTENTE = ['blu', 'verde', 'arancio', 'viola', 'rosa', 'turchese', 'giallo', 'rosso'];
 var STATI_EVENTO = ['attivo', 'annullato', 'archiviato'];
 
 var LISTE_DEFAULT = {
@@ -714,8 +721,27 @@ var Users = (function () {
     if (!can(u, what)) throw new CtrlError('FORBIDDEN', 'Non hai i permessi per questa operazione');
   }
 
+  /** Colore della persona: quello scelto, altrimenti uno stabile ricavato dall'email (così non cambia mai a ogni lettura). */
+  function coloreDi(u) {
+    if (u && COLORI_UTENTE.indexOf(u.colore) >= 0) return u.colore;
+    var h = 0, e = Util.normEmail(u && u.email);
+    for (var i = 0; i < e.length; i++) h = (h * 31 + e.charCodeAt(i)) % 997;
+    return COLORI_UTENTE[h % COLORI_UTENTE.length];
+  }
+
+  /** Il colore meno usato tra gli utenti (a parità, il primo della tavolozza). Da chiamare dentro Db.withLock. */
+  function scegliColore(escludiEmail) {
+    var usi = {};
+    COLORI_UTENTE.forEach(function (c) { usi[c] = 0; });
+    Db.all('utenti').forEach(function (u) {
+      if (Util.normEmail(u.email) === escludiEmail) return;
+      if (usi.hasOwnProperty(u.colore)) usi[u.colore]++;
+    });
+    return COLORI_UTENTE.slice().sort(function (a, b) { return usi[a] - usi[b] || COLORI_UTENTE.indexOf(a) - COLORI_UTENTE.indexOf(b); })[0];
+  }
+
   function publicProfile(u) {
-    return { email: u.email, nome: u.nome || u.email, ruolo: u.ruolo, permessi: perms(u) };
+    return { id: u.id || '', email: u.email, nome: u.nome || u.email, ruolo: u.ruolo, colore: coloreDi(u), permessi: perms(u) };
   }
 
   function touchLogin(email) {
@@ -738,7 +764,8 @@ var Users = (function () {
         attivo: Util.bool(u.attivo) || u.email === adminEmail(), ultimo_accesso: u.ultimo_accesso, versione: u.versione,
         protetto: u.email === adminEmail(),
         scade_il: scade, scaduto: scaduto(u), giorni_rimasti: valida && !scaduto(u) ? Util.diffDays(oggi, scade) : null,
-        sessioni: sessioni[u.email] || 0
+        sessioni: sessioni[u.email] || 0,
+        nome_calendario: u.nome_calendario || '', colore: coloreDi(u)
       };
     }).sort(function (a, b) { return a.email < b.email ? -1 : 1; });
   }
@@ -763,6 +790,11 @@ var Users = (function () {
       if (scade && !Util.isDate(scade)) throw new CtrlError('INVALID', 'Data di scadenza non valida');
       if (scade && isAdminMail) throw new CtrlError('INVALID', 'Il proprietario non ha scadenza');
     }
+    var colore;
+    if (p.colore !== undefined && p.colore !== null && p.colore !== '') {
+      colore = String(p.colore);
+      if (COLORI_UTENTE.indexOf(colore) < 0) throw new CtrlError('INVALID', 'Colore non valido');
+    }
     var fields = {
       email: email,
       nome: Util.text(p.nome, 80),
@@ -773,13 +805,16 @@ var Users = (function () {
       aggiornato_il: Util.nowIso()
     };
     if (scade !== undefined) fields.scade_il = scade;
+    if (p.nome_calendario !== undefined) fields.nome_calendario = Util.text(p.nome_calendario, 200);
+    if (colore) fields.colore = colore;
     return Db.withLock(function () {
       var existing = Db.find('utenti', 'email', email);
       var out;
       if (existing) {
         var before = JSON.parse(JSON.stringify(existing));
         out = Db.update('utenti', 'email', email, fields, p.versione);
-        var d = Storico.diff(before, out, ['nome', 'ruolo', 'attivo', 'scade_il']);
+        if (!out.colore && !fields.colore) { out = Db.update('utenti', 'email', email, { colore: scegliColore(email) }, null, true); }
+        var d = Storico.diff(before, out, ['nome', 'ruolo', 'attivo', 'scade_il', 'nome_calendario', 'colore']);
         if (d.changed) Storico.log(actor.email, '', 'utenti', 'modifica', email, d.prima, d.dopo);
         var lostAccess = before.attivo !== out.attivo && out.attivo === 'FALSE';
         var demoted = ruoloDi(before) !== ruoloDi(out);
@@ -792,12 +827,15 @@ var Users = (function () {
         else if (before.attivo === 'FALSE' && out.attivo === 'TRUE') Accessi.log(email, 'riattivato', 'ok', '', '', actor.email);
       } else {
         fields.id = Util.newId('usr');
+        if (!fields.colore) fields.colore = scegliColore('');
         fields.creato_il = Util.nowIso();
         fields.versione = '1';
         out = Db.insert('utenti', fields);
         Storico.log(actor.email, '', 'utenti', 'crea', email, '', { ruolo: ruolo });
         Accessi.log(email, 'utente_creato', 'ok', '', etichettaRuolo(ruolo) + (out.scade_il ? ' · fino al ' + out.scade_il : ''), actor.email);
       }
+      // nome, alias o stato possono cambiare chi viene trovato nelle descrizioni
+      Staff.ricalcolaSicuro_();
       return { email: out.email, versione: out.versione };
     });
   }
@@ -827,7 +865,7 @@ var Users = (function () {
   return {
     proroga: proroga, scaduto: scaduto, etichettaRuolo: etichettaRuolo,
     byEmail: byEmail, ruoloDi: ruoloDi, perms: perms, can: can, require: require_, publicProfile: publicProfile,
-    touchLogin: touchLogin, list: list, save: save, adminEmail: adminEmail
+    touchLogin: touchLogin, list: list, save: save, adminEmail: adminEmail, coloreDi: coloreDi, scegliColore: scegliColore
   };
 })();
 
@@ -1078,6 +1116,301 @@ var Richieste = (function () {
   return { crea: crea, lista: lista, gestisci: gestisci };
 })();
 
+// ===== 15_Staff.js =====
+/**
+ * CTRL · Staff assegnato agli eventi.
+ *
+ * - Un'assegnazione collega una persona (utente) a un evento. Solo l'OWNER assegna.
+ * - Dalle descrizioni del Calendar nascono PROPOSTE: CTRL cerca nel testo il "nome in calendario" di ogni utente
+ *   attivo (parola intera, senza maiuscole né accenti). Una proposta non vale nulla finché l'OWNER non la conferma.
+ * - Le assegnazioni confermate o manuali non cambiano con la sincronizzazione. Una proposta scartata resta scartata.
+ * - Chi non è assegnato vede l'evento ma non i suoi documenti: Production Plan, Material List, file e note.
+ *   Per le produzioni con più eventi (festival) basta essere assegnati a uno degli eventi della produzione.
+ *
+ * stato: proposta · confermata · scartata (non è lui) · rimossa (tolta a mano) · decaduta (il nome non c'è più)
+ */
+var Staff = (function () {
+  var FINESTRA_GIORNI = 30;
+  var CONTESTO = 24;
+
+  // ---------- ricerca dei nomi nel testo ----------
+  function senzaAccenti(s) {
+    var t = String(s || '');
+    try { t = t.normalize('NFD'); } catch (e) { /* ambiente senza normalize */ }
+    return t.replace(/[̀-ͯ]/g, '').toLowerCase();
+  }
+
+  /** Parole del testo con la loro posizione: lettere e cifre latine, accentate comprese. */
+  function parole(testo) {
+    var out = [], re = /[A-Za-z0-9À-ɏ]+/g, m;
+    while ((m = re.exec(testo)) !== null) out.push({ n: senzaAccenti(m[0]), start: m.index, end: m.index + m[0].length });
+    return out;
+  }
+
+  /** Alias di un utente: "nome in calendario" separato da virgole; se vuoto, il primo nome (almeno 3 lettere). */
+  function alias(u) {
+    var elenco = String(u.nome_calendario || '').split(/[,;\n]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    if (!elenco.length) {
+      var primo = String(u.nome || '').trim().split(/\s+/)[0];
+      if (primo && senzaAccenti(primo).length >= 3) elenco = [primo];
+    }
+    return elenco.map(function (a) { return parole(a).map(function (w) { return w.n; }); })
+      .filter(function (a) { return a.length && a.join('').length >= 2; });
+  }
+
+  function cerca(testoParole, aliasUtente) {
+    for (var k = 0; k < aliasUtente.length; k++) {
+      var a = aliasUtente[k];
+      for (var i = 0; i + a.length <= testoParole.length; i++) {
+        var ok = true;
+        for (var j = 0; j < a.length; j++) if (testoParole[i + j].n !== a[j]) { ok = false; break; }
+        if (ok) return { da: testoParole[i].start, a: testoParole[i + a.length - 1].end };
+      }
+    }
+    return null;
+  }
+
+  function frammento(testo, da, a) {
+    var s = Math.max(0, da - CONTESTO), e = Math.min(testo.length, a + CONTESTO);
+    var f = testo.slice(s, e).replace(/\s+/g, ' ');
+    var termine = testo.slice(da, a);
+    return { trovato: Util.text((s > 0 ? '…' : '') + f + (e < testo.length ? '…' : ''), 160), termine: Util.text(termine, 80) };
+  }
+
+  /** Utenti che possono essere assegnati: attivi e non scaduti. */
+  function utentiAttivi() {
+    return Db.all('utenti').filter(function (u) {
+      return (Util.bool(u.attivo) || Util.normEmail(u.email) === Users.adminEmail()) && !Users.scaduto(u);
+    });
+  }
+
+  function trovaNomi(e, attivi) {
+    var out = {};
+    var testo = String(e.descrizione || '');
+    if (!testo) return out;
+    var w = parole(testo);
+    attivi.forEach(function (u) {
+      var m = cerca(w, alias(u));
+      if (m) out[Util.normEmail(u.email)] = frammento(testo, m.da, m.a);
+    });
+    return out;
+  }
+
+  function perEvento() {
+    var out = {};
+    Db.all('assegnazioni').forEach(function (r) {
+      if (!out[r.evento_id]) out[r.evento_id] = {};
+      out[r.evento_id][r.email] = r;
+    });
+    return out;
+  }
+
+  /**
+   * Ricalcola le proposte di tutti gli eventi attivi recenti o futuri. Da chiamare dentro Db.withLock.
+   * Non tocca assegnazioni confermate né proposte scartate.
+   */
+  function ricalcola_() {
+    var da = Util.addDays(Util.today(), -FINESTRA_GIORNI);
+    var attivi = utentiAttivi();
+    var righe = perEvento();
+    var stamp = Util.nowIso();
+    var res = { nuove: 0, aggiornate: 0, decadute: 0 };
+    Db.all('eventi').forEach(function (e) {
+      if (e.stato !== 'attivo' || (e.data_fine || e.data) < da) return;
+      var trovati = trovaNomi(e, attivi);
+      var esistenti = righe[e.id] || {};
+      Object.keys(trovati).forEach(function (email) {
+        var t = trovati[email], r = esistenti[email];
+        if (!r) {
+          Db.insert('assegnazioni', { id: Util.newId('as'), evento_id: e.id, email: email, stato: 'proposta', origine: 'calendario',
+            trovato: t.trovato, termine: t.termine, creata_il: stamp, creata_da: 'calendar', aggiornata_il: stamp, aggiornata_da: 'calendar' });
+          Storico.log('calendar', e.id, 'staff', 'proposta', email, '', t.termine);
+          res.nuove++;
+        } else if (r.stato === 'proposta') {
+          if (r.trovato !== t.trovato || r.termine !== t.termine) {
+            Db.update('assegnazioni', 'id', r.id, { trovato: t.trovato, termine: t.termine, aggiornata_il: stamp, aggiornata_da: 'calendar' });
+            res.aggiornate++;
+          }
+        } else if (r.stato === 'decaduta' || r.stato === 'rimossa') {
+          Db.update('assegnazioni', 'id', r.id, { stato: 'proposta', origine: 'calendario', trovato: t.trovato, termine: t.termine,
+            aggiornata_il: stamp, aggiornata_da: 'calendar' });
+          Storico.log('calendar', e.id, 'staff', 'proposta', email, r.stato, t.termine);
+          res.nuove++;
+        }
+      });
+      Object.keys(esistenti).forEach(function (email) {
+        var r = esistenti[email];
+        if (r.stato === 'proposta' && !trovati[email]) {
+          Db.update('assegnazioni', 'id', r.id, { stato: 'decaduta', aggiornata_il: stamp, aggiornata_da: 'calendar' });
+          res.decadute++;
+        }
+      });
+    });
+    return res;
+  }
+
+  /** Come ricalcola_ ma senza mai far fallire l'operazione che lo chiama. Da chiamare dentro Db.withLock. */
+  function ricalcolaSicuro_() {
+    try { return ricalcola_(); }
+    catch (e) { console.error('CTRL proposte staff non aggiornate', e && e.message || e); return null; }
+  }
+
+  // ---------- accesso ai documenti ----------
+  /**
+   * Cosa può vedere un utente: l'OWNER tutto; gli altri gli eventi a cui sono assegnati (confermati)
+   * e quelli che condividono la stessa produzione.
+   */
+  function contesto(user) {
+    if (!user || Users.can(user, 'admin')) return { tutto: true, consente: function () { return true; }, produzione: function () { return true; } };
+    var mie = {}, prod = {};
+    var eventi = {};
+    Db.all('eventi').forEach(function (e) { eventi[e.id] = e; });
+    Db.all('assegnazioni').forEach(function (r) {
+      if (r.email !== Util.normEmail(user.email) || r.stato !== 'confermata') return;
+      mie[r.evento_id] = true;
+      var e = eventi[r.evento_id];
+      if (e && e.progetto_id) prod[e.progetto_id] = true;
+    });
+    return {
+      tutto: false,
+      assegnato: function (eventoId) { return !!mie[eventoId]; },
+      consente: function (e) { return !!(e && (mie[e.id] || (e.progetto_id && prod[e.progetto_id]))); },
+      produzione: function (pid) { return !!prod[pid]; }
+    };
+  }
+
+  var MSG = 'Documenti, file e note sono riservati allo staff assegnato all\'evento';
+
+  function puoAccedere(user, e) { return contesto(user).consente(e); }
+  function richiediEvento(user, e) {
+    if (!contesto(user).consente(e)) throw new CtrlError('FORBIDDEN', MSG);
+  }
+  function richiediProduzione(user, pid) {
+    if (!contesto(user).produzione(String(pid || ''))) throw new CtrlError('FORBIDDEN', MSG);
+  }
+
+  // ---------- vista per le liste di eventi ----------
+  function nomeDi(u) {
+    return String(u.nome || '').trim() || String(u.email || '').split('@')[0];
+  }
+
+  /** Strumenti per costruire la lista eventi con una sola lettura delle tabelle. */
+  function perLista(user) {
+    var ctx = contesto(user);
+    var owner = ctx.tutto;
+    var utenti = {};
+    Db.all('utenti').forEach(function (u) { utenti[Util.normEmail(u.email)] = u; });
+    var conf = {}, prop = {};
+    Db.all('assegnazioni').forEach(function (r) {
+      if (r.stato === 'confermata') (conf[r.evento_id] = conf[r.evento_id] || []).push(r);
+      else if (r.stato === 'proposta') prop[r.evento_id] = (prop[r.evento_id] || 0) + 1;
+    });
+    var mia = Util.normEmail(user && user.email);
+    return {
+      accesso: function (e) { return ctx.consente(e); },
+      staff: function (eventoId) {
+        return (conf[eventoId] || []).slice().sort(function (a, b) { return a.aggiornata_il < b.aggiornata_il ? -1 : a.aggiornata_il > b.aggiornata_il ? 1 : 0; })
+          .map(function (r) {
+            var u = utenti[r.email] || { email: r.email, nome: '' };
+            return { id: u.id || '', nome: nomeDi(u), colore: Users.coloreDi(u) };
+          });
+      },
+      mio: function (eventoId) { return (conf[eventoId] || []).some(function (r) { return r.email === mia; }); },
+      daConfermare: function (eventoId) { return owner ? (prop[eventoId] || 0) : 0; }
+    };
+  }
+
+  // ---------- azioni dell'OWNER ----------
+  function vistaPersona(r, u) {
+    u = u || { email: r.email, nome: '', ruolo: 'VIEWER' };
+    return { email: r.email, nome: u.nome || r.email, ruolo: Users.ruoloDi(u), colore: Users.coloreDi(u),
+      origine: r.origine, trovato: r.trovato, termine: r.termine, stato: r.stato };
+  }
+
+  function evento_(id) {
+    var e = Db.find('eventi', 'id', String(id || ''));
+    if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
+    return e;
+  }
+
+  /** Staff di un evento per la scheda "Staff" (solo OWNER). */
+  function lista(actor, p) {
+    Users.require(actor, 'impostazioni');
+    var e = evento_(p && p.evento_id);
+    var utenti = {};
+    Db.all('utenti').forEach(function (u) { utenti[Util.normEmail(u.email)] = u; });
+    var righe = Db.all('assegnazioni').filter(function (r) { return r.evento_id === e.id; })
+      .sort(function (a, b) { return a.creata_il < b.creata_il ? -1 : 1; });
+    var per = function (stato) {
+      return righe.filter(function (r) { return r.stato === stato; }).map(function (r) { return vistaPersona(r, utenti[r.email]); });
+    };
+    var assegnati = per('confermata');
+    var presi = {};
+    assegnati.forEach(function (a) { presi[a.email] = true; });
+    var candidati = utentiAttivi().filter(function (u) { return !presi[Util.normEmail(u.email)]; })
+      .map(function (u) { return { email: u.email, nome: u.nome || u.email, ruolo: Users.ruoloDi(u), colore: Users.coloreDi(u) }; })
+      .sort(function (a, b) { return a.nome.toLowerCase() < b.nome.toLowerCase() ? -1 : 1; });
+    return { evento_id: e.id, assegnati: assegnati, proposte: per('proposta'), scartate: per('scartata'), candidati: candidati };
+  }
+
+  var AZIONI = ['conferma', 'scarta', 'rimuovi', 'ripristina', 'aggiungi'];
+
+  function gestisci(actor, p) {
+    Users.require(actor, 'impostazioni');
+    p = p || {};
+    var azione = String(p.azione || '');
+    if (AZIONI.indexOf(azione) < 0) throw new CtrlError('INVALID', 'Azione non valida');
+    var email = Util.normEmail(p.email);
+    if (!Util.isEmail(email)) throw new CtrlError('INVALID', 'Email non valida');
+    var e = evento_(p.evento_id);
+    Db.withLock(function () {
+      var riga = (perEvento()[e.id] || {})[email] || null;
+      var u = Db.find('utenti', 'email', email);
+      var stamp = Util.nowIso();
+      var scrivi = function (patch, prima) {
+        patch.aggiornata_il = stamp; patch.aggiornata_da = actor.email;
+        Db.update('assegnazioni', 'id', riga.id, patch);
+        Storico.log(actor.email, e.id, 'staff', azione, email, prima, patch.stato);
+      };
+      if (azione === 'aggiungi') {
+        if (!u || !utentiAttivi().some(function (x) { return Util.normEmail(x.email) === email; })) throw new CtrlError('INVALID', 'Utente non attivo');
+        if (riga && riga.stato === 'confermata') return;
+        if (riga) scrivi({ stato: 'confermata', origine: 'manuale' }, riga.stato);
+        else {
+          Db.insert('assegnazioni', { id: Util.newId('as'), evento_id: e.id, email: email, stato: 'confermata', origine: 'manuale',
+            creata_il: stamp, creata_da: actor.email, aggiornata_il: stamp, aggiornata_da: actor.email });
+          Storico.log(actor.email, e.id, 'staff', 'aggiungi', email, '', 'confermata');
+        }
+        return;
+      }
+      if (!riga) throw new CtrlError('NOT_FOUND', 'Assegnazione non trovata');
+      if (azione === 'conferma') {
+        if (riga.stato !== 'proposta') throw new CtrlError('CONFLICT', 'La proposta non è più in attesa');
+        scrivi({ stato: 'confermata' }, riga.stato);
+      } else if (azione === 'scarta') {
+        if (riga.stato !== 'proposta') throw new CtrlError('CONFLICT', 'La proposta non è più in attesa');
+        scrivi({ stato: 'scartata' }, riga.stato);
+      } else if (azione === 'rimuovi') {
+        if (riga.stato !== 'confermata') throw new CtrlError('CONFLICT', 'La persona non è assegnata');
+        // se veniva dal Calendar si ricorda che non era lei, altrimenti la prossima sync la riproporrebbe
+        scrivi({ stato: riga.origine === 'calendario' ? 'scartata' : 'rimossa' }, riga.stato);
+      } else if (azione === 'ripristina') {
+        if (riga.stato !== 'scartata') throw new CtrlError('CONFLICT', 'Niente da ripristinare');
+        var trovati = u ? trovaNomi(e, [u]) : {};
+        if (!trovati[email]) throw new CtrlError('INVALID', 'Il nome non è più nella descrizione dell\'evento');
+        scrivi({ stato: 'proposta', trovato: trovati[email].trovato, termine: trovati[email].termine }, riga.stato);
+      }
+    });
+    return lista(actor, { evento_id: e.id });
+  }
+
+  return {
+    ricalcola_: ricalcola_, ricalcolaSicuro_: ricalcolaSicuro_, contesto: contesto, puoAccedere: puoAccedere,
+    richiediEvento: richiediEvento, richiediProduzione: richiediProduzione, perLista: perLista,
+    lista: lista, gestisci: gestisci, alias: alias, MSG: MSG
+  };
+})();
+
 // ===== 20_Events.js =====
 /**
  * CTRL · Eventi.
@@ -1101,14 +1434,16 @@ var Events = (function () {
     return out;
   }
 
-  function view(e, conteggi, user) {
+  function view(e, conteggi, user, st) {
     var c = conteggi[e.id] || { piano: 0, materiale: 0, scheda: 0 };
+    var accesso = st.accesso(e);
     var v = {
       id: e.id, origine: e.origine, titolo: e.titolo, data: e.data, data_fine: e.data_fine || e.data,
       ora_inizio: e.ora_inizio, ora_fine: e.ora_fine, luogo: e.luogo, descrizione: e.descrizione,
-      colore: e.colore || COLORE_DEFAULT, stato: e.stato, note: e.note, versione: e.versione,
+      colore: e.colore || COLORE_DEFAULT, stato: e.stato, note: accesso ? e.note : '', versione: e.versione,
       aggiornato_il: e.aggiornato_il, aggiornato_da: e.aggiornato_da, produzione_id: e.progetto_id || '',
-      stato_doc: { piano: c.piano > 0, materiale: c.materiale > 0, scheda: c.scheda > 0 }
+      stato_doc: { piano: c.piano > 0, materiale: c.materiale > 0, scheda: c.scheda > 0 },
+      staff: st.staff(e.id), mio: st.mio(e.id), accesso: accesso, da_confermare: st.daConfermare(e.id)
     };
     if (user && Users.can(user, 'admin') && e.cartella_id) v.cartella_url = 'https://drive.google.com/drive/folders/' + e.cartella_id;
     return v;
@@ -1116,10 +1451,11 @@ var Events = (function () {
 
   function list(user, p) {
     var conteggi = contaSezioni();
+    var st = Staff.perLista(user);
     var includiArchiviati = !!(p && p.archiviati);
     return Db.all('eventi')
       .filter(function (e) { return includiArchiviati || e.stato !== 'archiviato'; })
-      .map(function (e) { return view(e, conteggi, user); })
+      .map(function (e) { return view(e, conteggi, user, st); })
       .sort(function (a, b) {
         var ka = a.data + (a.ora_inizio || '99:99') + a.titolo;
         var kb = b.data + (b.ora_inizio || '99:99') + b.titolo;
@@ -1130,9 +1466,10 @@ var Events = (function () {
   function get(user, p) {
     var e = Db.find('eventi', 'id', p && p.id);
     if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
-    var out = view(e, contaSezioni(), user);
-    out.allegati = Allegati.perEvento(e.id);
-    out.produzione = e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;
+    var out = view(e, contaSezioni(), user, Staff.perLista(user));
+    // chi non è nello staff vede l'evento ma non file, documenti e note
+    out.allegati = out.accesso ? Allegati.perEvento(e.id) : null;
+    out.produzione = out.accesso && e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;
     if (Users.can(user, 'admin')) out.storico = Storico.forEvent(e.id, 30);
     return out;
   }
@@ -1184,6 +1521,7 @@ var Events = (function () {
       f.versione = '1';
       var row = Db.insert('eventi', f);
       Storico.log(user.email, row.id, 'evento', 'crea', row.id, '', { titolo: row.titolo, data: row.data });
+      Staff.ricalcolaSicuro_();
       return get(user, { id: row.id });
     });
   }
@@ -1202,6 +1540,7 @@ var Events = (function () {
     }
     if ('note' in p) {
       Users.require(user, 'modificare');
+      Staff.richiediEvento(user, e);
       patch.note = Util.text(p.note, 5000);
     }
     if (!Object.keys(patch).length) throw new CtrlError('INVALID', 'Nessuna modifica');
@@ -1215,6 +1554,7 @@ var Events = (function () {
       var row = Db.update('eventi', 'id', p.id, patch, p.versione);
       var d = Storico.diff(before, row, CAL_FIELDS.concat(['note']));
       if (d.changed) Storico.log(user.email, row.id, 'evento', 'modifica', row.id, d.prima, d.dopo);
+      if (patch.descrizione !== undefined) Staff.ricalcolaSicuro_();
       return get(user, { id: row.id });
     });
   }
@@ -1354,6 +1694,10 @@ var CalendarSync = (function () {
         res.annullati++;
       });
 
+      // le descrizioni cambiate possono nominare persone dello staff: nascono (o decadono) le proposte
+      var prop = Staff.ricalcolaSicuro_();
+      if (prop) res.proposte = prop.nuove;
+
       Settings.setRaw('sync_ultimo', stamp);
       Settings.setRaw('sync_esito', res);
       if (actorEmail) Storico.log(actorEmail, '', 'sync', 'manuale', '', '', res);
@@ -1435,6 +1779,7 @@ var Allegati = (function () {
 
     return Db.withLock(function () {
       var e = evento(p.evento_id);
+      Staff.richiediEvento(user, e);
       var file = cartella(e).createFile(Utilities.newBlob(bytes, mime, nome));
       var row = Db.insert('allegati', {
         id: Util.newId('al'), evento_id: e.id, sezione: p.sezione, drive_id: file.getId(), nome: nome, mime: mime,
@@ -1453,6 +1798,7 @@ var Allegati = (function () {
 
   function scarica(user, p) {
     var a = trovaAllegato(p && p.id);
+    Staff.richiediEvento(user, evento(a.evento_id));
     var file;
     try { file = DriveApp.getFileById(a.drive_id); } catch (err) { throw new CtrlError('NOT_FOUND', 'Il file non è più su Drive'); }
     if (file.isTrashed && file.isTrashed()) throw new CtrlError('NOT_FOUND', 'Il file è nel cestino di Drive');
@@ -1464,6 +1810,7 @@ var Allegati = (function () {
     Users.require(user, 'caricare');
     return Db.withLock(function () {
       var a = trovaAllegato(p && p.id);
+      Staff.richiediEvento(user, evento(a.evento_id));
       if (!Users.can(user, 'admin') && a.caricato_da !== user.email) {
         throw new CtrlError('FORBIDDEN', 'Puoi togliere solo i file che hai caricato tu');
       }
@@ -1548,6 +1895,7 @@ var Produzioni = (function () {
     Users.require(user, 'modificare');
     return Db.withLock(function () {
       var e = evento(p && p.evento_id);
+      Staff.richiediEvento(user, e);
       if (trova(e.progetto_id)) return riepilogo(e.progetto_id);
       var now = Util.nowIso(), pid = Util.newId('pr');
       Db.insert('progetti', { id: pid, nome: Util.text(e.titolo, 120) || 'Produzione', tipo: 'evento', stato: 'attivo',
@@ -1566,6 +1914,8 @@ var Produzioni = (function () {
       var pr = trova(p && p.id);
       if (!pr) throw new CtrlError('NOT_FOUND', 'Scheda di produzione non trovata');
       var e = evento(p && p.evento_id);
+      Staff.richiediProduzione(user, pr.id);
+      Staff.richiediEvento(user, e);
       if (e.progetto_id === pr.id) return riepilogo(pr.id);
       if (trova(e.progetto_id)) throw new CtrlError('INVALID', 'Questo evento fa già parte di un\'altra scheda di produzione');
       Db.update('eventi', 'id', e.id, { progetto_id: pr.id }, null, true);
@@ -1582,6 +1932,7 @@ var Produzioni = (function () {
       var pr = trova(p && p.id);
       if (!pr) throw new CtrlError('NOT_FOUND', 'Scheda di produzione non trovata');
       var e = evento(p && p.evento_id);
+      Staff.richiediProduzione(user, pr.id);
       if (e.progetto_id !== pr.id) throw new CtrlError('NOT_FOUND', 'Evento non collegato a questa scheda');
       if (eventiDi(pr.id).length <= 1) throw new CtrlError('INVALID', 'Una scheda di produzione deve avere almeno un evento');
       Db.update('eventi', 'id', e.id, { progetto_id: '' }, null, true);
@@ -1725,6 +2076,7 @@ var Documenti = (function () {
 
   function get(user, p) {
     var tipo = tipoValido(p && p.tipo), pr = produzione(p && p.produzione_id);
+    Staff.richiediProduzione(user, pr.id);
     var doc = trovaDoc(pr.id, tipo);
     return vista(user, pr, tipo, doc, doc ? leggi(doc) : null);
   }
@@ -1746,6 +2098,7 @@ var Documenti = (function () {
     Users.require(user, 'modificare');
     var tipo = tipoValido(p && p.tipo);
     var pr = produzione(p && p.produzione_id);
+    Staff.richiediProduzione(user, pr.id);
     var dati = pulisci(tipo, p && p.dati);
     var testo = JSON.stringify(dati);
     if (testo.length > MAX_CARATTERI) throw new CtrlError('INVALID', 'Documento troppo grande');
@@ -1781,6 +2134,7 @@ var Documenti = (function () {
     p = p || {};
     var tipo = tipoValido(p.tipo);
     var pr = produzione(p.produzione_id);
+    Staff.richiediProduzione(user, pr.id);
     var conf = PDF[tipo];
     var nome = Util.text(p.nome, 150).replace(/[\\/]+/g, '-');
     if (nome.indexOf(conf.prefisso) !== 0 || !/\.pdf$/i.test(nome)) throw new CtrlError('INVALID', 'Nome del PDF non valido');
@@ -1846,6 +2200,9 @@ var ACTIONS = {
   'utenti.proroga': { fn: function (u, p) { return Users.proroga(u, p); } },
   'utenti.sessioni': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.sessionsOf(Util.normEmail(p.email)); } },
   'utenti.disconnetti': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.revoke(u, Util.normEmail(p.email), p.id); } },
+
+  'staff.evento': { fn: function (u, p) { return Staff.lista(u, p); } },
+  'staff.gestisci': { fn: function (u, p) { return Staff.gestisci(u, p); } },
 
   'accesso.richieste': { fn: function (u) { return Richieste.lista(u); } },
   'accesso.gestisci': { fn: function (u, p) { return Richieste.gestisci(u, p); } },
@@ -1985,6 +2342,7 @@ function setup_(env) {
     log.push('Creato proprietario ' + props.ADMIN_EMAIL);
   }
   migraRuoli_(log);
+  migraColori_(log);
   if (!Settings.getRaw('schema_versione')) Settings.setRaw('schema_versione', String(SCHEMA_VERSION));
 
   installTriggers_();
@@ -2013,6 +2371,17 @@ function migraRuoli_(log) {
     Storico.log('setup', '', 'utenti', 'ruolo_migrato', u.email, prima.ruolo, nuovo);
     if (String(prima.ruolo).toUpperCase() === 'ADMIN' && nuovo !== 'OWNER') Auth.revokeAll(u.email);
     log.push('Ruolo ' + u.email + ': ' + prima.ruolo + ' → ' + nuovo);
+  });
+}
+
+/** Dà un colore a chi non ne ha ancora (il meno usato). Idempotente: non cambia i colori già assegnati. */
+function migraColori_(log) {
+  Db.clearCache();
+  Db.all('utenti').forEach(function (u) {
+    if (COLORI_UTENTE.indexOf(u.colore) >= 0) return;
+    var c = Users.scegliColore(Util.normEmail(u.email));
+    Db.update('utenti', 'email', u.email, { colore: c }, null, true);
+    log.push('Colore ' + u.email + ': ' + c);
   });
 }
 

@@ -20,14 +20,16 @@ var Events = (function () {
     return out;
   }
 
-  function view(e, conteggi, user) {
+  function view(e, conteggi, user, st) {
     var c = conteggi[e.id] || { piano: 0, materiale: 0, scheda: 0 };
+    var accesso = st.accesso(e);
     var v = {
       id: e.id, origine: e.origine, titolo: e.titolo, data: e.data, data_fine: e.data_fine || e.data,
       ora_inizio: e.ora_inizio, ora_fine: e.ora_fine, luogo: e.luogo, descrizione: e.descrizione,
-      colore: e.colore || COLORE_DEFAULT, stato: e.stato, note: e.note, versione: e.versione,
+      colore: e.colore || COLORE_DEFAULT, stato: e.stato, note: accesso ? e.note : '', versione: e.versione,
       aggiornato_il: e.aggiornato_il, aggiornato_da: e.aggiornato_da, produzione_id: e.progetto_id || '',
-      stato_doc: { piano: c.piano > 0, materiale: c.materiale > 0, scheda: c.scheda > 0 }
+      stato_doc: { piano: c.piano > 0, materiale: c.materiale > 0, scheda: c.scheda > 0 },
+      staff: st.staff(e.id), mio: st.mio(e.id), accesso: accesso, da_confermare: st.daConfermare(e.id)
     };
     if (user && Users.can(user, 'admin') && e.cartella_id) v.cartella_url = 'https://drive.google.com/drive/folders/' + e.cartella_id;
     return v;
@@ -35,10 +37,11 @@ var Events = (function () {
 
   function list(user, p) {
     var conteggi = contaSezioni();
+    var st = Staff.perLista(user);
     var includiArchiviati = !!(p && p.archiviati);
     return Db.all('eventi')
       .filter(function (e) { return includiArchiviati || e.stato !== 'archiviato'; })
-      .map(function (e) { return view(e, conteggi, user); })
+      .map(function (e) { return view(e, conteggi, user, st); })
       .sort(function (a, b) {
         var ka = a.data + (a.ora_inizio || '99:99') + a.titolo;
         var kb = b.data + (b.ora_inizio || '99:99') + b.titolo;
@@ -49,9 +52,10 @@ var Events = (function () {
   function get(user, p) {
     var e = Db.find('eventi', 'id', p && p.id);
     if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
-    var out = view(e, contaSezioni(), user);
-    out.allegati = Allegati.perEvento(e.id);
-    out.produzione = e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;
+    var out = view(e, contaSezioni(), user, Staff.perLista(user));
+    // chi non è nello staff vede l'evento ma non file, documenti e note
+    out.allegati = out.accesso ? Allegati.perEvento(e.id) : null;
+    out.produzione = out.accesso && e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;
     if (Users.can(user, 'admin')) out.storico = Storico.forEvent(e.id, 30);
     return out;
   }
@@ -103,6 +107,7 @@ var Events = (function () {
       f.versione = '1';
       var row = Db.insert('eventi', f);
       Storico.log(user.email, row.id, 'evento', 'crea', row.id, '', { titolo: row.titolo, data: row.data });
+      Staff.ricalcolaSicuro_();
       return get(user, { id: row.id });
     });
   }
@@ -121,6 +126,7 @@ var Events = (function () {
     }
     if ('note' in p) {
       Users.require(user, 'modificare');
+      Staff.richiediEvento(user, e);
       patch.note = Util.text(p.note, 5000);
     }
     if (!Object.keys(patch).length) throw new CtrlError('INVALID', 'Nessuna modifica');
@@ -134,6 +140,7 @@ var Events = (function () {
       var row = Db.update('eventi', 'id', p.id, patch, p.versione);
       var d = Storico.diff(before, row, CAL_FIELDS.concat(['note']));
       if (d.changed) Storico.log(user.email, row.id, 'evento', 'modifica', row.id, d.prima, d.dopo);
+      if (patch.descrizione !== undefined) Staff.ricalcolaSicuro_();
       return get(user, { id: row.id });
     });
   }

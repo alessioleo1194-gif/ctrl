@@ -128,6 +128,7 @@ var Documenti = (function () {
 
   function get(user, p) {
     var tipo = tipoValido(p && p.tipo), pr = produzione(p && p.produzione_id);
+    Staff.richiediProduzione(user, pr.id);
     var doc = trovaDoc(pr.id, tipo);
     return vista(user, pr, tipo, doc, doc ? leggi(doc) : null);
   }
@@ -149,6 +150,7 @@ var Documenti = (function () {
     Users.require(user, 'modificare');
     var tipo = tipoValido(p && p.tipo);
     var pr = produzione(p && p.produzione_id);
+    Staff.richiediProduzione(user, pr.id);
     var dati = pulisci(tipo, p && p.dati);
     var testo = JSON.stringify(dati);
     if (testo.length > MAX_CARATTERI) throw new CtrlError('INVALID', 'Documento troppo grande');
@@ -184,6 +186,7 @@ var Documenti = (function () {
     p = p || {};
     var tipo = tipoValido(p.tipo);
     var pr = produzione(p.produzione_id);
+    Staff.richiediProduzione(user, pr.id);
     var conf = PDF[tipo];
     var nome = Util.text(p.nome, 150).replace(/[\\/]+/g, '-');
     if (nome.indexOf(conf.prefisso) !== 0 || !/\.pdf$/i.test(nome)) throw new CtrlError('INVALID', 'Nome del PDF non valido');

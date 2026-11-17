@@ -75,8 +75,27 @@ var Users = (function () {
     if (!can(u, what)) throw new CtrlError('FORBIDDEN', 'Non hai i permessi per questa operazione');
   }
 
+  /** Colore della persona: quello scelto, altrimenti uno stabile ricavato dall'email (così non cambia mai a ogni lettura). */
+  function coloreDi(u) {
+    if (u && COLORI_UTENTE.indexOf(u.colore) >= 0) return u.colore;
+    var h = 0, e = Util.normEmail(u && u.email);
+    for (var i = 0; i < e.length; i++) h = (h * 31 + e.charCodeAt(i)) % 997;
+    return COLORI_UTENTE[h % COLORI_UTENTE.length];
+  }
+
+  /** Il colore meno usato tra gli utenti (a parità, il primo della tavolozza). Da chiamare dentro Db.withLock. */
+  function scegliColore(escludiEmail) {
+    var usi = {};
+    COLORI_UTENTE.forEach(function (c) { usi[c] = 0; });
+    Db.all('utenti').forEach(function (u) {
+      if (Util.normEmail(u.email) === escludiEmail) return;
+      if (usi.hasOwnProperty(u.colore)) usi[u.colore]++;
+    });
+    return COLORI_UTENTE.slice().sort(function (a, b) { return usi[a] - usi[b] || COLORI_UTENTE.indexOf(a) - COLORI_UTENTE.indexOf(b); })[0];
+  }
+
   function publicProfile(u) {
-    return { email: u.email, nome: u.nome || u.email, ruolo: u.ruolo, permessi: perms(u) };
+    return { id: u.id || '', email: u.email, nome: u.nome || u.email, ruolo: u.ruolo, colore: coloreDi(u), permessi: perms(u) };
   }
 
   function touchLogin(email) {
@@ -99,7 +118,8 @@ var Users = (function () {
         attivo: Util.bool(u.attivo) || u.email === adminEmail(), ultimo_accesso: u.ultimo_accesso, versione: u.versione,
         protetto: u.email === adminEmail(),
         scade_il: scade, scaduto: scaduto(u), giorni_rimasti: valida && !scaduto(u) ? Util.diffDays(oggi, scade) : null,
-        sessioni: sessioni[u.email] || 0
+        sessioni: sessioni[u.email] || 0,
+        nome_calendario: u.nome_calendario || '', colore: coloreDi(u)
       };
     }).sort(function (a, b) { return a.email < b.email ? -1 : 1; });
   }
@@ -124,6 +144,11 @@ var Users = (function () {
       if (scade && !Util.isDate(scade)) throw new CtrlError('INVALID', 'Data di scadenza non valida');
       if (scade && isAdminMail) throw new CtrlError('INVALID', 'Il proprietario non ha scadenza');
     }
+    var colore;
+    if (p.colore !== undefined && p.colore !== null && p.colore !== '') {
+      colore = String(p.colore);
+      if (COLORI_UTENTE.indexOf(colore) < 0) throw new CtrlError('INVALID', 'Colore non valido');
+    }
     var fields = {
       email: email,
       nome: Util.text(p.nome, 80),
@@ -134,13 +159,16 @@ var Users = (function () {
       aggiornato_il: Util.nowIso()
     };
     if (scade !== undefined) fields.scade_il = scade;
+    if (p.nome_calendario !== undefined) fields.nome_calendario = Util.text(p.nome_calendario, 200);
+    if (colore) fields.colore = colore;
     return Db.withLock(function () {
       var existing = Db.find('utenti', 'email', email);
       var out;
       if (existing) {
         var before = JSON.parse(JSON.stringify(existing));
         out = Db.update('utenti', 'email', email, fields, p.versione);
-        var d = Storico.diff(before, out, ['nome', 'ruolo', 'attivo', 'scade_il']);
+        if (!out.colore && !fields.colore) { out = Db.update('utenti', 'email', email, { colore: scegliColore(email) }, null, true); }
+        var d = Storico.diff(before, out, ['nome', 'ruolo', 'attivo', 'scade_il', 'nome_calendario', 'colore']);
         if (d.changed) Storico.log(actor.email, '', 'utenti', 'modifica', email, d.prima, d.dopo);
         var lostAccess = before.attivo !== out.attivo && out.attivo === 'FALSE';
         var demoted = ruoloDi(before) !== ruoloDi(out);
@@ -153,12 +181,15 @@ var Users = (function () {
         else if (before.attivo === 'FALSE' && out.attivo === 'TRUE') Accessi.log(email, 'riattivato', 'ok', '', '', actor.email);
       } else {
         fields.id = Util.newId('usr');
+        if (!fields.colore) fields.colore = scegliColore('');
         fields.creato_il = Util.nowIso();
         fields.versione = '1';
         out = Db.insert('utenti', fields);
         Storico.log(actor.email, '', 'utenti', 'crea', email, '', { ruolo: ruolo });
         Accessi.log(email, 'utente_creato', 'ok', '', etichettaRuolo(ruolo) + (out.scade_il ? ' · fino al ' + out.scade_il : ''), actor.email);
       }
+      // nome, alias o stato possono cambiare chi viene trovato nelle descrizioni
+      Staff.ricalcolaSicuro_();
       return { email: out.email, versione: out.versione };
     });
   }
@@ -188,6 +219,6 @@ var Users = (function () {
   return {
     proroga: proroga, scaduto: scaduto, etichettaRuolo: etichettaRuolo,
     byEmail: byEmail, ruoloDi: ruoloDi, perms: perms, can: can, require: require_, publicProfile: publicProfile,
-    touchLogin: touchLogin, list: list, save: save, adminEmail: adminEmail
+    touchLogin: touchLogin, list: list, save: save, adminEmail: adminEmail, coloreDi: coloreDi, scegliColore: scegliColore
   };
 })();

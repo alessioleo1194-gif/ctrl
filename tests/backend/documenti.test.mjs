@@ -47,6 +47,7 @@ const ok = (r) => { assert.equal(r.ok, true, JSON.stringify(r)); return r.data; 
 const rows = (env, name) => env.getSS(DB).getSheetByName(name).rows();
 
 
+const assegna = (env, titolo, ...emails) => emails.forEach(email => ok(call(env.ctx, 'staff.gestisci', { evento_id: env.ev(titolo).id, azione: 'aggiungi', email }, env.token)));
 const assicura = (env, titolo = 'Cantelmo') => ok(call(env.ctx, 'produzione.assicura', { evento_id: env.ev(titolo).id }, env.token));
 const get = (env, pid, tipo, token = env.token) => call(env.ctx, 'documento.get', { produzione_id: pid, tipo }, token);
 const salvaDoc = (env, pid, tipo, versione, dati, token = env.token) => call(env.ctx, 'documento.salva', { produzione_id: pid, tipo, versione, dati }, token);
@@ -105,6 +106,7 @@ test('permessi: la lettura legge ma non salva né crea la produzione', () => {
   const p = assicura(env);
   ok(salvaDoc(env, p.id, 'plan', '0', PLAN()));
   const lett = utente(env, 'tecnico@example.com', 'VIEWER');
+  assegna(env, 'Cantelmo', 'tecnico@example.com');
   assert.equal(ok(get(env, p.id, 'plan', lett)).dati.crew.length, 1);
   assert.equal(ok(get(env, p.id, 'plan', lett)).permessi.modificare, false);
   assert.equal(salvaDoc(env, p.id, 'plan', '1', PLAN(), lett).ok, false);

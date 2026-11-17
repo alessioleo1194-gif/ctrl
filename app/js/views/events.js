@@ -2,6 +2,7 @@ import { h, icon } from '../ui.js';
 import { store, navigate } from '../app.js';
 import { dayParts, monthLabel, today, timeRange, shortDate } from '../format.js';
 import { openEventForm } from './eventForm.js';
+import { staffNomi } from '../persone.js';
 
 /** Lista eventi: prossimi o passati, ricerca, raggruppati per mese. */
 export function renderList(pane, selectedId) {
@@ -12,7 +13,8 @@ export function renderList(pane, selectedId) {
     const q = store.q.trim().toLowerCase();
     let evs = store.events.filter(e => store.filter === 'prossimi' ? (e.data_fine || e.data) >= t : (e.data_fine || e.data) < t);
     if (store.filter === 'passati') evs = evs.slice().reverse();
-    if (q) evs = evs.filter(e => (e.titolo + ' ' + (e.luogo || '') + ' ' + (e.descrizione || '')).toLowerCase().includes(q));
+    if (store.mine) evs = evs.filter(e => e.mio);
+    if (q) evs = evs.filter(e => (e.titolo + ' ' + (e.luogo || '') + ' ' + (e.descrizione || '') + ' ' + (e.staff || []).map(x => x.nome).join(' ')).toLowerCase().includes(q));
     return evs;
   }
 
@@ -25,6 +27,14 @@ export function renderList(pane, selectedId) {
       icon('piano', 'piano' + (e.stato_doc.piano ? ' on' : ''), e.stato_doc.piano ? 'Piano di produzione presente' : 'Piano di produzione mancante'),
       icon('materiale', 'materiale' + (e.stato_doc.materiale ? ' on' : ''), e.stato_doc.materiale ? 'Lista materiale presente' : 'Lista materiale mancante'),
       icon('scheda', 'scheda' + (e.stato_doc.scheda ? ' on' : ''), e.stato_doc.scheda ? 'Scheda tecnica presente' : 'Scheda tecnica mancante'));
+    const finito = (e.data_fine || e.data) < t;
+    const staff = e.staff || [];
+    const nomi = staff.length || e.da_confermare || !finito
+      ? h('div', { class: 'names', 'aria-label': 'Staff' },
+        staffNomi(staff),
+        !staff.length && !finito ? h('span', { class: 'help' }, 'nessuno staff') : null,
+        e.da_confermare ? h('span', { class: 'tag warn', title: 'Nomi trovati nella descrizione, da confermare nell\'evento' }, e.da_confermare + ' da confermare') : null)
+      : null;
     return h('button', {
       class: 'ev' + (e.stato === 'annullato' ? ' annullato' : '') + ((e.data_fine || e.data) < t ? ' passato' : ''),
       role: 'listitem', 'aria-current': e.id === selectedId ? 'true' : null,
@@ -37,14 +47,15 @@ export function renderList(pane, selectedId) {
       h('div', { class: 'm' },
         isToday ? h('span', { class: 'tag today', style: { marginRight: '6px' } }, 'Oggi') : null,
         e.stato === 'annullato' ? h('span', { class: 'tag danger', style: { marginRight: '6px' } }, 'Annullato') : null,
-        meta)),
+        meta),
+      nomi),
     ind);
   }
 
   function draw() {
     const evs = filtered();
     if (!evs.length) {
-      listBox.replaceChildren(h('div', { class: 'empty' }, store.q ? 'Nessun evento corrisponde alla ricerca.' : store.filter === 'prossimi' ? 'Nessun evento in programma.' : 'Nessun evento passato.'));
+      listBox.replaceChildren(h('div', { class: 'empty' }, store.q ? 'Nessun evento corrisponde alla ricerca.' : store.mine ? 'Non sei assegnato a nessun evento in questo elenco.' : store.filter === 'prossimi' ? 'Nessun evento in programma.' : 'Nessun evento passato.'));
       return;
     }
     const out = [];
@@ -66,9 +77,15 @@ export function renderList(pane, selectedId) {
 
   const search = h('input', { class: 'input', type: 'search', placeholder: 'Cerca evento o luogo', value: store.q, 'aria-label': 'Cerca', oninput: (e) => { store.q = e.target.value; draw(); } });
 
+  const mine = h('button', { class: 'chip-t', type: 'button', 'aria-pressed': String(!!store.mine), title: 'Mostra solo gli eventi a cui sei assegnato', onclick: (ev) => {
+    store.mine = !store.mine;
+    ev.currentTarget.setAttribute('aria-pressed', String(store.mine));
+    draw();
+  } }, 'Solo i miei');
+
   const head = h('div', { class: 'list-head' },
-    h('div', { class: 'row', style: { justifyContent: 'space-between' } },
-      seg,
+    h('div', { class: 'list-tools' },
+      seg, mine, h('span', { class: 'grow' }),
       store.user.permessi.creareEventi ? h('button', { class: 'btn primary desk-only', onclick: () => openEventForm(null) }, icon('plus'), 'Nuovo evento') : null),
     h('div', { class: 'search' }, icon('search'), search));
 

@@ -44,6 +44,7 @@ var Produzioni = (function () {
     Users.require(user, 'modificare');
     return Db.withLock(function () {
       var e = evento(p && p.evento_id);
+      Staff.richiediEvento(user, e);
       if (trova(e.progetto_id)) return riepilogo(e.progetto_id);
       var now = Util.nowIso(), pid = Util.newId('pr');
       Db.insert('progetti', { id: pid, nome: Util.text(e.titolo, 120) || 'Produzione', tipo: 'evento', stato: 'attivo',
@@ -62,6 +63,8 @@ var Produzioni = (function () {
       var pr = trova(p && p.id);
       if (!pr) throw new CtrlError('NOT_FOUND', 'Scheda di produzione non trovata');
       var e = evento(p && p.evento_id);
+      Staff.richiediProduzione(user, pr.id);
+      Staff.richiediEvento(user, e);
       if (e.progetto_id === pr.id) return riepilogo(pr.id);
       if (trova(e.progetto_id)) throw new CtrlError('INVALID', 'Questo evento fa già parte di un\'altra scheda di produzione');
       Db.update('eventi', 'id', e.id, { progetto_id: pr.id }, null, true);
@@ -78,6 +81,7 @@ var Produzioni = (function () {
       var pr = trova(p && p.id);
       if (!pr) throw new CtrlError('NOT_FOUND', 'Scheda di produzione non trovata');
       var e = evento(p && p.evento_id);
+      Staff.richiediProduzione(user, pr.id);
       if (e.progetto_id !== pr.id) throw new CtrlError('NOT_FOUND', 'Evento non collegato a questa scheda');
       if (eventiDi(pr.id).length <= 1) throw new CtrlError('INVALID', 'Una scheda di produzione deve avere almeno un evento');
       Db.update('eventi', 'id', e.id, { progetto_id: '' }, null, true);

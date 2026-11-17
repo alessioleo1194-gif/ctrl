@@ -87,6 +87,7 @@ function setup_(env) {
     log.push('Creato proprietario ' + props.ADMIN_EMAIL);
   }
   migraRuoli_(log);
+  migraColori_(log);
   if (!Settings.getRaw('schema_versione')) Settings.setRaw('schema_versione', String(SCHEMA_VERSION));
 
   installTriggers_();
@@ -115,6 +116,17 @@ function migraRuoli_(log) {
     Storico.log('setup', '', 'utenti', 'ruolo_migrato', u.email, prima.ruolo, nuovo);
     if (String(prima.ruolo).toUpperCase() === 'ADMIN' && nuovo !== 'OWNER') Auth.revokeAll(u.email);
     log.push('Ruolo ' + u.email + ': ' + prima.ruolo + ' → ' + nuovo);
+  });
+}
+
+/** Dà un colore a chi non ne ha ancora (il meno usato). Idempotente: non cambia i colori già assegnati. */
+function migraColori_(log) {
+  Db.clearCache();
+  Db.all('utenti').forEach(function (u) {
+    if (COLORI_UTENTE.indexOf(u.colore) >= 0) return;
+    var c = Users.scegliColore(Util.normEmail(u.email));
+    Db.update('utenti', 'email', u.email, { colore: c }, null, true);
+    log.push('Colore ' + u.email + ': ' + c);
   });
 }
 

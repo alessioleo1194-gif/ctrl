@@ -115,6 +115,10 @@ var CalendarSync = (function () {
         res.annullati++;
       });
 
+      // le descrizioni cambiate possono nominare persone dello staff: nascono (o decadono) le proposte
+      var prop = Staff.ricalcolaSicuro_();
+      if (prop) res.proposte = prop.nuove;
+
       Settings.setRaw('sync_ultimo', stamp);
       Settings.setRaw('sync_esito', res);
       if (actorEmail) Storico.log(actorEmail, '', 'sync', 'manuale', '', '', res);

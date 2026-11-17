@@ -14,6 +14,7 @@ export const store = {
   settings: null,
   events: null,
   filter: 'prossimi',
+  mine: false,
   q: ''
 };
 
@@ -63,7 +64,7 @@ function topbar() {
 async function logout() {
   try { await api('auth.logout', {}); } catch { /* si esce comunque */ }
   session.token = '';
-  store.user = null; store.events = null; store.settings = null;
+  store.user = null; store.events = null; store.settings = null; store.mine = false;
   start();
 }
 
