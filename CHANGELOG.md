@@ -1,5 +1,11 @@
 # Registro delle modifiche
 
+## 0.10.2 · Indirizzo del sito operativo (17/11/2026)
+
+- Il sito operativo si chiamerà **ctrl-leo.netlify.app** ("ctrl.netlify.app" è di un altro sito). `PROD_HOSTS` elenca sia il nuovo nome sia il vecchio,
+  quindi l'app parla con la produzione con entrambi; qualsiasi altro indirizzo (anteprime, rami, locale) resta sul TEST. Test dedicato.
+- Solo frontend (`CTRL_VERSION` del backend resta 0.10.1). Il rinomino su Netlify avviene al rilascio, non prima.
+
 ## 0.10.1 · Il Viewer vede solo i suoi eventi (17/11/2026)
 
 - **Chi ha solo lettura (Viewer) vede soltanto gli eventi a cui è assegnato**, prossimi e passati. Gli altri non compaiono né nell'elenco né per nome né da link diretto

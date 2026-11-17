@@ -32,7 +32,7 @@ npm run serve        # app in locale su http://localhost:4173
 
 ## Stato
 
-In produzione su https://ctrl-alessioleo.netlify.app.
+In produzione su https://ctrl-leo.netlify.app (finché il sito Netlify non è rinominato: https://ctrl-alessioleo.netlify.app).
 Fase 1 (fondamenta): accesso, ruoli, eventi dal Calendar e manuali, note di produzione, impostazioni, app installabile.
 Scheda di produzione (in costruzione a tappe): programma (Production Schedule) con PDF e stampa, struttura, persone e squadra; file allegati su Drive. Prossime tappe: lista materiali per location, artisti e channel list, materiale calcolato dai rider.
 Librerie dell'app copiate in `app/vendor` con versione bloccata: jsPDF 4.2.1, jspdf-autotable 5.0.9 (licenze MIT in `app/vendor/LICENSES.txt`).

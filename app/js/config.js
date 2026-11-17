@@ -9,8 +9,11 @@ export const API = {
   test: 'https://script.google.com/macros/s/AKfycbwnAwUJJiy7lfQiSmbSZMyw070wOSSQdHdjuxLOu3sUDxALECUvxVByDwj7FTrxgVaS/exec'
 };
 
-/** Domini considerati produzione (il sito Netlify principale). */
-export const PROD_HOSTS = ['ctrl-alessioleo.netlify.app'];
+/**
+ * Domini considerati produzione (il sito Netlify principale). Ogni altro indirizzo usa il server di TEST.
+ * ctrl-leo è il nome scelto per il rilascio; ctrl-alessioleo resta finché il sito non è rinominato.
+ */
+export const PROD_HOSTS = ['ctrl-leo.netlify.app', 'ctrl-alessioleo.netlify.app'];
 
 export function environment(host = location.hostname) {
   if (PROD_HOSTS.includes(host)) return 'prod';
