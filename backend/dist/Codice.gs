@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.7.0
+ * CTRL API · versione 0.8.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.7.0';
+var CTRL_VERSION = '0.8.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -112,6 +112,17 @@ var Util = (function () {
     return d.toISOString().slice(0, 10);
   }
 
+  /** Oggi, nel fuso dello script (yyyy-MM-dd). */
+  function today() {
+    return fmtDate(new Date());
+  }
+
+  /** Giorni interi da a a b (date yyyy-MM-dd). */
+  function diffDays(a, b) {
+    var pa = a.split('-'), pb = b.split('-');
+    return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
+  }
+
   function isEmail(s) {
     return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
   }
@@ -164,7 +175,7 @@ var Util = (function () {
 
   return {
     newId: newId, newToken: newToken, newCode: newCode, sha256: sha256,
-    nowIso: nowIso, fmtDate: fmtDate, fmtTime: fmtTime, addDays: addDays,
+    nowIso: nowIso, fmtDate: fmtDate, fmtTime: fmtTime, addDays: addDays, today: today, diffDays: diffDays,
     isEmail: isEmail, normEmail: normEmail, isDate: isDate, isTime: isTime, isColor: isColor,
     text: text, stripHtml: stripHtml, bool: bool
   };
@@ -179,7 +190,7 @@ var Util = (function () {
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 4;
+var SCHEMA_VERSION = 5;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -211,11 +222,16 @@ var SCHEMA = {
   // documenti operativi di una produzione (Production Plan, Material List): JSON spezzato in parti
   documenti: ['id', 'progetto_id', 'tipo', 'versione', 'parti', 'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'eliminato'],
   documenti_parti: ['id', 'documento_id', 'n', 'testo'],
+  // scade_il: ultimo giorno di accesso (yyyy-MM-dd, ora italiana); vuoto = nessuna scadenza
   utenti: ['id', 'email', 'nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo', 'creato_il',
-    'aggiornato_il', 'versione', 'ultimo_accesso'],
+    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il'],
   sessioni: ['hash', 'email', 'creata', 'scade', 'ultimo_uso', 'dispositivo'],
   condivisioni: ['id', 'hash', 'eventi', 'sezioni', 'mostra_contatti', 'scade', 'revocato', 'creato_da',
     'creato_il', 'ultimo_accesso', 'etichetta'],
+  // richieste di accesso fatte da chi non ha ancora un account (stato: in_attesa, approvata, rifiutata)
+  richieste_accesso: ['id', 'email', 'nome', 'messaggio', 'creata_il', 'stato', 'gestita_il', 'gestita_da', 'ruolo', 'scade_il'],
+  // registro accessi: solo aggiunta, le righe oltre 180 giorni si cancellano da sole (come le sessioni)
+  accessi: ['ts', 'email', 'evento', 'esito', 'dispositivo', 'dettaglio', 'attore'],
   storico: ['ts', 'email', 'evento_id', 'sezione', 'azione', 'rif_id', 'prima', 'dopo'],
   config: ['chiave', 'valore', 'aggiornato_il']
 };
@@ -343,6 +359,18 @@ var Db = (function () {
     return true;
   }
 
+  /**
+   * Cancellazione fisica delle righe che soddisfano pred: solo per tabelle di servizio con scadenza
+   * (sessioni, registro accessi, richieste chiuse). Da chiamare dentro withLock. Ritorna quante righe toglie.
+   */
+  function removeWhere(name, pred) {
+    var t = read(name);
+    var rows = t.rows.filter(pred).sort(function (a, b) { return b._row - a._row; });
+    rows.forEach(function (r) { t.sheet.deleteRow(r._row); });
+    delete tableCache[name];
+    return rows.length;
+  }
+
   function clearCache() {
     tableCache = {};
     ssCache = null;
@@ -363,7 +391,7 @@ var Db = (function () {
 
   return {
     ss: ss, sheet: sheet, all: all, find: find, insert: insert, update: update,
-    removeRow: removeRow, clearCache: clearCache, withLock: withLock
+    removeRow: removeRow, removeWhere: removeWhere, clearCache: clearCache, withLock: withLock
   };
 })();
 
@@ -418,6 +446,8 @@ var Storico = (function () {
  * - La risposta a "invia codice" è identica anche se l'email non è autorizzata,
  *   così non si può scoprire chi ha accesso.
  * - Nel foglio si salva solo l'impronta (hash) del token di sessione.
+ * - Accessi, logout, codici errati e accessi scaduti finiscono nel registro accessi (solo utenti esistenti).
+ * - Un utente con accesso scaduto (scade_il passata) non entra e le sue sessioni non valgono più.
  */
 var Auth = (function () {
   var CODE_TTL_MIN = 10;
@@ -428,6 +458,8 @@ var Auth = (function () {
   function cache() { return CacheService.getScriptCache(); }
 
   function key(prefix, email) { return prefix + Util.sha256(email).slice(0, 40); }
+
+  function dev(payload) { return Util.text(payload && payload.dispositivo, 120); }
 
   function requestCode(payload) {
     var email = Util.normEmail(payload && payload.email);
@@ -470,6 +502,8 @@ var Auth = (function () {
     if (Date.now() > rec.exp) { c.remove(k); throw new CtrlError('CODE_EXPIRED', 'Codice scaduto. Chiedine uno nuovo.'); }
     if (rec.h !== Util.sha256(email + ':' + code)) {
       rec.tries++;
+      Accessi.logSafe(email, rec.tries >= CODE_MAX_TRIES ? 'codici_esauriti' : 'codice_errato', 'ko', dev(payload),
+        'Tentativo ' + rec.tries + ' di ' + CODE_MAX_TRIES);
       if (rec.tries >= CODE_MAX_TRIES) {
         c.remove(k);
         throw new CtrlError('CODE_EXPIRED', 'Troppi tentativi. Chiedi un nuovo codice.');
@@ -480,7 +514,14 @@ var Auth = (function () {
     c.remove(k);
 
     var user = Users.byEmail(email);
-    if (!user || !Util.bool(user.attivo)) throw new CtrlError('FORBIDDEN', 'Accesso non autorizzato');
+    if (!user || !Util.bool(user.attivo)) {
+      if (user) Accessi.logSafe(email, 'accesso_negato', 'ko', dev(payload), 'Accesso disattivato');
+      throw new CtrlError('FORBIDDEN', 'Accesso non autorizzato');
+    }
+    if (Users.scaduto(user)) {
+      Accessi.logSafe(email, 'accesso_scaduto', 'scaduto', dev(payload), 'Valido fino al ' + (user.scade_il || '?'));
+      throw new CtrlError('FORBIDDEN', 'Accesso scaduto. Chiedi di riattivarlo a chi gestisce CTRL.');
+    }
 
     return Db.withLock(function () {
       var token = Util.newToken();
@@ -489,9 +530,10 @@ var Auth = (function () {
       Db.insert('sessioni', {
         hash: Util.sha256(token), email: email, creata: now,
         scade: Utilities.formatDate(exp, CTRL_TZ, "yyyy-MM-dd'T'HH:mm:ss"), ultimo_uso: now,
-        dispositivo: Util.text(payload.dispositivo, 120)
+        dispositivo: dev(payload)
       });
       Users.touchLogin(email);
+      Accessi.log(email, 'login', 'ok', dev(payload), '');
       return { token: token, utente: Users.publicProfile(Users.byEmail(email)) };
     });
   }
@@ -505,6 +547,7 @@ var Auth = (function () {
     if (s.scade < Util.nowIso()) throw new CtrlError('AUTH_REQUIRED', 'Sessione scaduta. Accedi di nuovo.');
     var user = Users.byEmail(s.email);
     if (!user || !Util.bool(user.attivo)) throw new CtrlError('AUTH_REQUIRED', 'Accesso revocato');
+    if (Users.scaduto(user)) throw new CtrlError('AUTH_REQUIRED', 'Accesso scaduto. Chiedi di riattivarlo a chi gestisce CTRL.');
     var touchLimit = Utilities.formatDate(new Date(Date.now() - TOUCH_EVERY_MIN * 60000), CTRL_TZ, "yyyy-MM-dd'T'HH:mm:ss");
     if (s.ultimo_uso < touchLimit) {
       try {
@@ -517,7 +560,12 @@ var Auth = (function () {
   function logout(token) {
     if (!token) return { ok: true };
     var h = Util.sha256(token);
-    Db.withLock(function () { Db.removeRow('sessioni', 'hash', h); });
+    Db.withLock(function () {
+      var s = Db.find('sessioni', 'hash', h);
+      if (!s) return;
+      Accessi.log(s.email, 'logout', 'ok', s.dispositivo, '');
+      Db.removeRow('sessioni', 'hash', h);
+    });
     return { ok: true };
   }
 
@@ -526,6 +574,48 @@ var Auth = (function () {
     var rows = Db.all('sessioni').filter(function (s) { return s.email === email; });
     rows.forEach(function (s) { Db.removeRow('sessioni', 'hash', s.hash); });
     return rows.length;
+  }
+
+  /** Sessioni valide di un utente, senza dati segreti: l'id è solo l'inizio dell'impronta. */
+  function sessionsOf(email) {
+    var now = Util.nowIso();
+    return Db.all('sessioni')
+      .filter(function (s) { return s.email === email && s.scade >= now; })
+      .sort(function (a, b) { return a.ultimo_uso < b.ultimo_uso ? 1 : -1; })
+      .map(function (s) { return { id: s.hash.slice(0, 16), creata: s.creata, ultimo_uso: s.ultimo_uso, dispositivo: s.dispositivo }; });
+  }
+
+  /** Chiude una sessione (id) o tutte quelle di un utente, su richiesta del proprietario. */
+  function revoke(actor, email, id) {
+    return Db.withLock(function () {
+      var n;
+      if (id) {
+        if (String(id).length < 8) throw new CtrlError('INVALID', 'Dispositivo non valido');
+        var hit = Db.all('sessioni').filter(function (s) { return s.email === email && s.hash.indexOf(String(id)) === 0; });
+        hit.forEach(function (s) { Db.removeRow('sessioni', 'hash', s.hash); });
+        n = hit.length;
+      } else {
+        n = revokeAll(email);
+      }
+      if (n) Accessi.log(email, 'disconnessione', 'ok', '', id ? 'Un dispositivo' : 'Tutti i dispositivi (' + n + ')', actor.email);
+      return { chiuse: n };
+    });
+  }
+
+  /** Chiude le sessioni di chi ha superato la scadenza (notte). */
+  function closeExpiredUsers() {
+    return Db.withLock(function () {
+      var tot = 0;
+      Db.all('utenti').forEach(function (u) {
+        if (!Users.scaduto(u)) return;
+        var n = revokeAll(u.email);
+        if (n) {
+          tot += n;
+          Accessi.log(u.email, 'accesso_scaduto', 'scaduto', '', 'Sessioni chiuse: ' + n + ' · valido fino al ' + (u.scade_il || '?'), 'sistema');
+        }
+      });
+      return tot;
+    });
   }
 
   /** Pulizia periodica delle sessioni scadute. */
@@ -540,7 +630,10 @@ var Auth = (function () {
     return n;
   }
 
-  return { requestCode: requestCode, verifyCode: verifyCode, current: current, logout: logout, revokeAll: revokeAll, purgeExpired: purgeExpired };
+  return {
+    requestCode: requestCode, verifyCode: verifyCode, current: current, logout: logout, revokeAll: revokeAll,
+    purgeExpired: purgeExpired, sessionsOf: sessionsOf, revoke: revoke, closeExpiredUsers: closeExpiredUsers
+  };
 })();
 
 // ===== 11_Users.js =====
@@ -552,6 +645,8 @@ var Auth = (function () {
  *   Non si assegna dal portale: nessun altro può diventarlo.
  * - PRODUCTION: vede tutto, scarica i PDF, carica file, crea e modifica Production Plan e Material List.
  * - VIEWER: vede e scarica, non modifica nulla.
+ * Ogni utente (tranne il proprietario) può avere una scadenza: scade_il è l'ultimo giorno di accesso (ora italiana).
+ * Dal giorno dopo l'accesso è rifiutato e le sessioni vengono chiuse. Una data non valida nel foglio vale "scaduto".
  * I valori vecchi nel foglio (ADMIN, COLLABORATORE, LETTURA) vengono letti come i nuovi: ADMIN diverso dal proprietario
  * vale PRODUCTION, COLLABORATORE con puo_modificare vale PRODUCTION, gli altri VIEWER. Il setup li riscrive.
  */
@@ -567,6 +662,17 @@ var Users = (function () {
     if (r === 'ADMIN') return 'PRODUCTION';
     if (r === 'COLLABORATORE') return Util.bool(u.puo_modificare) ? 'PRODUCTION' : 'VIEWER';
     return 'VIEWER';
+  }
+
+  var ETICHETTE = { OWNER: 'Owner', PRODUCTION: 'Production', VIEWER: 'Viewer' };
+  function etichettaRuolo(r) { return ETICHETTE[r] || r; }
+
+  /** True se l'accesso è oltre la scadenza. Il proprietario non scade mai. */
+  function scaduto(u) {
+    if (!u || ruoloDi(u) === 'OWNER') return false;
+    var s = u.scade_il;
+    if (!s) return false;
+    return !Util.isDate(s) || Util.today() > s;
   }
 
   function byEmail(email) {
@@ -619,11 +725,20 @@ var Users = (function () {
 
   function list(actor) {
     require_(actor, 'impostazioni');
+    var now = Util.nowIso();
+    var sessioni = {};
+    Db.all('sessioni').forEach(function (x) { if (x.scade >= now) sessioni[x.email] = (sessioni[x.email] || 0) + 1; });
+    var oggi = Util.today();
     return Db.all('utenti').map(function (u) {
+      var owner = ruoloDi(u) === 'OWNER';
+      var scade = owner ? '' : (u.scade_il || '');
+      var valida = Util.isDate(scade);
       return {
         id: u.id, email: u.email, nome: u.nome, ruolo: ruoloDi(u),
         attivo: Util.bool(u.attivo) || u.email === adminEmail(), ultimo_accesso: u.ultimo_accesso, versione: u.versione,
-        protetto: u.email === adminEmail()
+        protetto: u.email === adminEmail(),
+        scade_il: scade, scaduto: scaduto(u), giorni_rimasti: valida && !scaduto(u) ? Util.diffDays(oggi, scade) : null,
+        sessioni: sessioni[u.email] || 0
       };
     }).sort(function (a, b) { return a.email < b.email ? -1 : 1; });
   }
@@ -642,6 +757,12 @@ var Users = (function () {
     } else if (RUOLI_ASSEGNABILI.indexOf(ruolo) < 0) {
       throw new CtrlError('INVALID', 'Ruolo non valido');
     }
+    var scade;
+    if (p.scade_il !== undefined) {
+      scade = p.scade_il === null ? '' : String(p.scade_il).trim();
+      if (scade && !Util.isDate(scade)) throw new CtrlError('INVALID', 'Data di scadenza non valida');
+      if (scade && isAdminMail) throw new CtrlError('INVALID', 'Il proprietario non ha scadenza');
+    }
     var fields = {
       email: email,
       nome: Util.text(p.nome, 80),
@@ -651,29 +772,60 @@ var Users = (function () {
       attivo: p.attivo === false ? 'FALSE' : 'TRUE',
       aggiornato_il: Util.nowIso()
     };
+    if (scade !== undefined) fields.scade_il = scade;
     return Db.withLock(function () {
       var existing = Db.find('utenti', 'email', email);
       var out;
       if (existing) {
         var before = JSON.parse(JSON.stringify(existing));
         out = Db.update('utenti', 'email', email, fields, p.versione);
-        var d = Storico.diff(before, out, ['nome', 'ruolo', 'attivo']);
+        var d = Storico.diff(before, out, ['nome', 'ruolo', 'attivo', 'scade_il']);
         if (d.changed) Storico.log(actor.email, '', 'utenti', 'modifica', email, d.prima, d.dopo);
         var lostAccess = before.attivo !== out.attivo && out.attivo === 'FALSE';
         var demoted = ruoloDi(before) !== ruoloDi(out);
         if (lostAccess || demoted) Auth.revokeAll(email);
+        if (demoted) Accessi.log(email, 'ruolo', 'ok', '', etichettaRuolo(ruoloDi(before)) + ' → ' + etichettaRuolo(ruoloDi(out)), actor.email);
+        if ((before.scade_il || '') !== (out.scade_il || '')) {
+          Accessi.log(email, 'scadenza', 'ok', '', (before.scade_il || 'nessuna') + ' → ' + (out.scade_il || 'nessuna'), actor.email);
+        }
+        if (lostAccess) Accessi.log(email, 'disattivato', 'ok', '', '', actor.email);
+        else if (before.attivo === 'FALSE' && out.attivo === 'TRUE') Accessi.log(email, 'riattivato', 'ok', '', '', actor.email);
       } else {
         fields.id = Util.newId('usr');
         fields.creato_il = Util.nowIso();
         fields.versione = '1';
         out = Db.insert('utenti', fields);
         Storico.log(actor.email, '', 'utenti', 'crea', email, '', { ruolo: ruolo });
+        Accessi.log(email, 'utente_creato', 'ok', '', etichettaRuolo(ruolo) + (out.scade_il ? ' · fino al ' + out.scade_il : ''), actor.email);
       }
       return { email: out.email, versione: out.versione };
     });
   }
 
+  /** Allunga la scadenza di 7 o 30 giorni, dalla data attuale o da oggi se già scaduta. */
+  function proroga(actor, p) {
+    require_(actor, 'impostazioni');
+    var email = Util.normEmail(p && p.email);
+    var giorni = Number(p && p.giorni);
+    if (giorni !== 7 && giorni !== 30) throw new CtrlError('INVALID', 'Durata non valida');
+    return Db.withLock(function () {
+      var u = Db.find('utenti', 'email', email);
+      if (!u) throw new CtrlError('NOT_FOUND', 'Utente non trovato');
+      if (ruoloDi(u) === 'OWNER') throw new CtrlError('INVALID', 'Il proprietario non ha scadenza');
+      if (!u.scade_il) throw new CtrlError('INVALID', 'Questo utente non ha una scadenza');
+      var oggi = Util.today();
+      var base = Util.isDate(u.scade_il) && u.scade_il > oggi ? u.scade_il : oggi;
+      var nuova = Util.addDays(base, giorni);
+      var prima = u.scade_il;
+      Db.update('utenti', 'email', email, { scade_il: nuova, aggiornato_il: Util.nowIso() });
+      Storico.log(actor.email, '', 'utenti', 'modifica', email, { scade_il: prima }, { scade_il: nuova });
+      Accessi.log(email, 'scadenza', 'ok', '', prima + ' → ' + nuova, actor.email);
+      return { email: email, scade_il: nuova };
+    });
+  }
+
   return {
+    proroga: proroga, scaduto: scaduto, etichettaRuolo: etichettaRuolo,
     byEmail: byEmail, ruoloDi: ruoloDi, perms: perms, can: can, require: require_, publicProfile: publicProfile,
     touchLogin: touchLogin, list: list, save: save, adminEmail: adminEmail
   };
@@ -736,6 +888,194 @@ var Settings = (function () {
   }
 
   return { get: get, lista: lista, saveList: saveList, getRaw: getRaw, setRaw: setRaw };
+})();
+
+// ===== 13_Accessi.js =====
+/**
+ * CTRL · Registro accessi (ACCESS LOG).
+ *
+ * Solo aggiunta, visibile solo al proprietario. Registra: accessi riusciti, logout, codici errati di utenti
+ * esistenti, accessi scaduti o negati, richieste di accesso e loro esito, cambi di ruolo / scadenza / stato,
+ * disconnessioni remote. NON registra: codici, token, tentativi di email sconosciute (solo la richiesta esplicita),
+ * indirizzo IP (Apps Script non lo espone). Il dispositivo è quello dichiarato dal browser, quindi falsificabile.
+ * Le righe oltre 180 giorni si cancellano ogni notte.
+ */
+var Accessi = (function () {
+  var CONSERVA_GIORNI = 180;
+  var MAX_RIGHE = 500;
+
+  var CATEGORIE = {
+    login: 'accessi', logout: 'accessi',
+    codice_errato: 'problemi', codici_esauriti: 'problemi', accesso_scaduto: 'problemi', accesso_negato: 'problemi',
+    richiesta: 'richieste', richiesta_approvata: 'richieste', richiesta_rifiutata: 'richieste',
+    utente_creato: 'amministrazione', ruolo: 'amministrazione', scadenza: 'amministrazione',
+    disattivato: 'amministrazione', riattivato: 'amministrazione', disconnessione: 'amministrazione'
+  };
+  var FILTRI = ['tutto', 'accessi', 'problemi', 'richieste', 'amministrazione'];
+
+  /** Scrive una riga. Da chiamare dentro Db.withLock. */
+  function log(email, evento, esito, dispositivo, dettaglio, attore) {
+    Db.insert('accessi', {
+      ts: Util.nowIso(), email: Util.normEmail(email), evento: evento, esito: esito || 'ok',
+      dispositivo: Util.text(dispositivo, 120), dettaglio: Util.text(dettaglio, 300), attore: Util.normEmail(attore)
+    });
+  }
+
+  /** Come log, ma con il proprio blocco e senza mai far fallire l'operazione che sta registrando. */
+  function logSafe(email, evento, esito, dispositivo, dettaglio, attore) {
+    try {
+      Db.withLock(function () { log(email, evento, esito, dispositivo, dettaglio, attore); });
+    } catch (e) {
+      console.error('CTRL log accessi non scritto', evento, e && e.message || e);
+    }
+  }
+
+  function list(actor, p) {
+    Users.require(actor, 'impostazioni');
+    p = p || {};
+    var filtro = FILTRI.indexOf(p.filtro) >= 0 ? p.filtro : 'tutto';
+    var q = Util.text(p.q, 80).toLowerCase();
+    var limite = Math.min(Math.max(parseInt(p.limite, 10) || 200, 1), MAX_RIGHE);
+    var righe = Db.all('accessi')
+      .filter(function (r) { return filtro === 'tutto' || CATEGORIE[r.evento] === filtro; })
+      .filter(function (r) {
+        return !q || (r.email + ' ' + r.attore + ' ' + r.dettaglio + ' ' + r.evento).toLowerCase().indexOf(q) >= 0;
+      })
+      .sort(function (a, b) { return a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : b._row - a._row; });
+    return {
+      totale: righe.length,
+      conserva_giorni: CONSERVA_GIORNI,
+      righe: righe.slice(0, limite).map(function (r) {
+        return {
+          ts: r.ts, email: r.email, evento: r.evento, esito: r.esito, dispositivo: r.dispositivo,
+          dettaglio: r.dettaglio, attore: r.attore, categoria: CATEGORIE[r.evento] || ''
+        };
+      })
+    };
+  }
+
+  /** Cancella le righe oltre la conservazione e le richieste già chiuse da altrettanto tempo. */
+  function purge() {
+    var cutoff = Utilities.formatDate(new Date(Date.now() - CONSERVA_GIORNI * 86400000), CTRL_TZ, "yyyy-MM-dd'T'HH:mm:ss");
+    return Db.withLock(function () {
+      var log_ = Db.removeWhere('accessi', function (r) { return r.ts && r.ts < cutoff; });
+      var req = Db.removeWhere('richieste_accesso', function (r) { return r.stato !== 'in_attesa' && r.gestita_il && r.gestita_il < cutoff; });
+      return { accessi: log_, richieste: req };
+    });
+  }
+
+  return { log: log, logSafe: logSafe, list: list, purge: purge, CATEGORIE: CATEGORIE };
+})();
+
+// ===== 14_Richieste.js =====
+/**
+ * CTRL · Richieste di accesso.
+ *
+ * Chi non ha un account può chiedere l'accesso dalla schermata di login. La risposta è sempre identica,
+ * esista o no l'email, così nessuno scopre chi ha già un account. Non parte nessuna email alla persona:
+ * quando il proprietario approva, la persona entra con il normale codice. Al proprietario arriva al più
+ * una email di avviso all'ora, senza testo scritto da chi ha fatto la richiesta.
+ * Limite globale: 3 richieste all'ora in totale, per non far riempire la tabella.
+ */
+var Richieste = (function () {
+  var MAX_ALL_ORA = 3;
+  var BLOCCO_RIFIUTO_GIORNI = 7;
+  var MAX_GIORNI = 365;
+
+  function cache() { return CacheService.getScriptCache(); }
+
+  function crea(p) {
+    var email = Util.normEmail(p && p.email);
+    if (!Util.isEmail(email)) throw new CtrlError('INVALID', 'Email non valida');
+    var nome = Util.text(p.nome, 80);
+    var messaggio = Util.text(p.messaggio, 300);
+
+    var c = cache();
+    var n = parseInt(c.get('accreq_ora') || '0', 10);
+    if (n >= MAX_ALL_ORA) throw new CtrlError('RATE_LIMIT', 'Troppe richieste di accesso. Riprova tra un\'ora.');
+    // il contatore sale per ogni chiamata, anche se l'email ha già un account: la risposta non rivela nulla
+    c.put('accreq_ora', String(n + 1), 3600);
+
+    var nuova = Db.withLock(function () {
+      if (email === Users.adminEmail() || Db.find('utenti', 'email', email)) return false;
+      var blocco = Utilities.formatDate(new Date(Date.now() - BLOCCO_RIFIUTO_GIORNI * 86400000), CTRL_TZ, "yyyy-MM-dd'T'HH:mm:ss");
+      var gia = Db.all('richieste_accesso').some(function (r) {
+        return r.email === email && (r.stato === 'in_attesa' || (r.stato === 'rifiutata' && r.gestita_il > blocco));
+      });
+      if (gia) return false;
+      Db.insert('richieste_accesso', {
+        id: Util.newId('acc'), email: email, nome: nome, messaggio: messaggio, creata_il: Util.nowIso(), stato: 'in_attesa'
+      });
+      Accessi.log(email, 'richiesta', 'attesa', p.dispositivo, '', '');
+      return true;
+    });
+    if (nuova) avvisaProprietario_();
+    return { inviata: true };
+  }
+
+  function avvisaProprietario_() {
+    var c = cache();
+    if (c.get('accreq_mail')) return;
+    c.put('accreq_mail', '1', 3600);
+    try {
+      MailApp.sendEmail({
+        to: Users.adminEmail(),
+        subject: 'CTRL · nuova richiesta di accesso',
+        body: 'C\'è una nuova richiesta di accesso a CTRL.\nApri CTRL > Impostazioni > Richieste di accesso per approvarla o rifiutarla.\n' +
+          'Altre richieste nell\'ora successiva non generano altre email.',
+        name: 'CTRL'
+      });
+    } catch (e) {
+      console.error('CTRL email di avviso non inviata', e && e.message || e);
+    }
+  }
+
+  function lista(actor) {
+    Users.require(actor, 'impostazioni');
+    return Db.all('richieste_accesso')
+      .filter(function (r) { return r.stato === 'in_attesa'; })
+      .sort(function (a, b) { return a.creata_il < b.creata_il ? 1 : -1; })
+      .map(function (r) { return { id: r.id, email: r.email, nome: r.nome, messaggio: r.messaggio, creata_il: r.creata_il }; });
+  }
+
+  function gestisci(actor, p) {
+    Users.require(actor, 'impostazioni');
+    var id = String(p.id || '');
+    var azione = p.azione;
+    if (azione !== 'approva' && azione !== 'rifiuta') throw new CtrlError('INVALID', 'Azione non valida');
+    var req = Db.find('richieste_accesso', 'id', id);
+    if (!req) throw new CtrlError('NOT_FOUND', 'Richiesta non trovata');
+    if (req.stato !== 'in_attesa') throw new CtrlError('CONFLICT', 'Richiesta già gestita');
+
+    if (azione === 'rifiuta') {
+      return Db.withLock(function () {
+        var r = Db.find('richieste_accesso', 'id', id);
+        if (!r || r.stato !== 'in_attesa') throw new CtrlError('CONFLICT', 'Richiesta già gestita');
+        Db.update('richieste_accesso', 'id', id, { stato: 'rifiutata', gestita_il: Util.nowIso(), gestita_da: actor.email });
+        Accessi.log(r.email, 'richiesta_rifiutata', 'ko', '', '', actor.email);
+        return { stato: 'rifiutata' };
+      });
+    }
+
+    var ruolo = String(p.ruolo || '').toUpperCase();
+    if (RUOLI_ASSEGNABILI.indexOf(ruolo) < 0) throw new CtrlError('INVALID', 'Ruolo non valido');
+    var giorni = p.giorni === undefined || p.giorni === null || p.giorni === '' ? 0 : Number(p.giorni);
+    if (!isFinite(giorni) || giorni < 0 || giorni > MAX_GIORNI || Math.floor(giorni) !== giorni) throw new CtrlError('INVALID', 'Durata non valida');
+    var scade = giorni ? Util.addDays(Util.today(), giorni) : '';
+
+    Users.save(actor, {
+      email: req.email, nome: req.nome || req.email.split('@')[0], ruolo: ruolo, scade_il: scade
+    });
+    return Db.withLock(function () {
+      Db.update('richieste_accesso', 'id', id, {
+        stato: 'approvata', gestita_il: Util.nowIso(), gestita_da: actor.email, ruolo: ruolo, scade_il: scade
+      });
+      Accessi.log(req.email, 'richiesta_approvata', 'ok', '', Users.etichettaRuolo(ruolo) + (scade ? ' · fino al ' + scade : ''), actor.email);
+      return { stato: 'approvata', email: req.email, ruolo: ruolo, scade_il: scade };
+    });
+  }
+
+  return { crea: crea, lista: lista, gestisci: gestisci };
 })();
 
 // ===== 20_Events.js =====
@@ -1475,6 +1815,7 @@ var Documenti = (function () {
 var ACTIONS = {
   'auth.requestCode': { pub: true, fn: function (u, p) { return Auth.requestCode(p); } },
   'auth.verifyCode': { pub: true, fn: function (u, p) { return Auth.verifyCode(p); } },
+  'accesso.richiedi': { pub: true, fn: function (u, p) { return Richieste.crea(p); } },
   'auth.me': { fn: function (u) { return Users.publicProfile(u); } },
   'auth.logout': { fn: function (u, p, token) { return Auth.logout(token); } },
 
@@ -1501,7 +1842,14 @@ var ACTIONS = {
   'impostazioni.lista': { fn: function (u, p) { return Settings.saveList(u, p); } },
 
   'utenti.list': { fn: function (u) { return Users.list(u); } },
-  'utenti.save': { fn: function (u, p) { return Users.save(u, p); } }
+  'utenti.save': { fn: function (u, p) { return Users.save(u, p); } },
+  'utenti.proroga': { fn: function (u, p) { return Users.proroga(u, p); } },
+  'utenti.sessioni': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.sessionsOf(Util.normEmail(p.email)); } },
+  'utenti.disconnetti': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.revoke(u, Util.normEmail(p.email), p.id); } },
+
+  'accesso.richieste': { fn: function (u) { return Richieste.lista(u); } },
+  'accesso.gestisci': { fn: function (u, p) { return Richieste.gestisci(u, p); } },
+  'accessi.list': { fn: function (u, p) { return Accessi.list(u, p); } }
 };
 
 function jsonOut(obj) {
@@ -1686,7 +2034,10 @@ function syncOraria() {
 
 function backupSettimanale() { return Backup.run(); }
 
-function puliziaNotturna() { return Auth.purgeExpired(); }
+/** Ogni notte: sessioni scadute, accessi scaduti, registro oltre 180 giorni. */
+function puliziaNotturna() {
+  return { sessioni: Auth.purgeExpired(), scaduti: Auth.closeExpiredUsers(), registro: Accessi.purge() };
+}
 
 var Backup = (function () {
   var KEEP = 8;

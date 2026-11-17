@@ -61,6 +61,17 @@ var Util = (function () {
     return d.toISOString().slice(0, 10);
   }
 
+  /** Oggi, nel fuso dello script (yyyy-MM-dd). */
+  function today() {
+    return fmtDate(new Date());
+  }
+
+  /** Giorni interi da a a b (date yyyy-MM-dd). */
+  function diffDays(a, b) {
+    var pa = a.split('-'), pb = b.split('-');
+    return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
+  }
+
   function isEmail(s) {
     return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
   }
@@ -113,7 +124,7 @@ var Util = (function () {
 
   return {
     newId: newId, newToken: newToken, newCode: newCode, sha256: sha256,
-    nowIso: nowIso, fmtDate: fmtDate, fmtTime: fmtTime, addDays: addDays,
+    nowIso: nowIso, fmtDate: fmtDate, fmtTime: fmtTime, addDays: addDays, today: today, diffDays: diffDays,
     isEmail: isEmail, normEmail: normEmail, isDate: isDate, isTime: isTime, isColor: isColor,
     text: text, stripHtml: stripHtml, bool: bool
   };

@@ -8,6 +8,7 @@
 var ACTIONS = {
   'auth.requestCode': { pub: true, fn: function (u, p) { return Auth.requestCode(p); } },
   'auth.verifyCode': { pub: true, fn: function (u, p) { return Auth.verifyCode(p); } },
+  'accesso.richiedi': { pub: true, fn: function (u, p) { return Richieste.crea(p); } },
   'auth.me': { fn: function (u) { return Users.publicProfile(u); } },
   'auth.logout': { fn: function (u, p, token) { return Auth.logout(token); } },
 
@@ -34,7 +35,14 @@ var ACTIONS = {
   'impostazioni.lista': { fn: function (u, p) { return Settings.saveList(u, p); } },
 
   'utenti.list': { fn: function (u) { return Users.list(u); } },
-  'utenti.save': { fn: function (u, p) { return Users.save(u, p); } }
+  'utenti.save': { fn: function (u, p) { return Users.save(u, p); } },
+  'utenti.proroga': { fn: function (u, p) { return Users.proroga(u, p); } },
+  'utenti.sessioni': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.sessionsOf(Util.normEmail(p.email)); } },
+  'utenti.disconnetti': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.revoke(u, Util.normEmail(p.email), p.id); } },
+
+  'accesso.richieste': { fn: function (u) { return Richieste.lista(u); } },
+  'accesso.gestisci': { fn: function (u, p) { return Richieste.gestisci(u, p); } },
+  'accessi.list': { fn: function (u, p) { return Accessi.list(u, p); } }
 };
 
 function jsonOut(obj) {

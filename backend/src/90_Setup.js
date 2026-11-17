@@ -136,7 +136,10 @@ function syncOraria() {
 
 function backupSettimanale() { return Backup.run(); }
 
-function puliziaNotturna() { return Auth.purgeExpired(); }
+/** Ogni notte: sessioni scadute, accessi scaduti, registro oltre 180 giorni. */
+function puliziaNotturna() {
+  return { sessioni: Auth.purgeExpired(), scaduti: Auth.closeExpiredUsers(), registro: Accessi.purge() };
+}
 
 var Backup = (function () {
   var KEEP = 8;

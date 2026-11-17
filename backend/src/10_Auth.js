@@ -6,6 +6,8 @@
  * - La risposta a "invia codice" è identica anche se l'email non è autorizzata,
  *   così non si può scoprire chi ha accesso.
  * - Nel foglio si salva solo l'impronta (hash) del token di sessione.
+ * - Accessi, logout, codici errati e accessi scaduti finiscono nel registro accessi (solo utenti esistenti).
+ * - Un utente con accesso scaduto (scade_il passata) non entra e le sue sessioni non valgono più.
  */
 var Auth = (function () {
   var CODE_TTL_MIN = 10;
@@ -16,6 +18,8 @@ var Auth = (function () {
   function cache() { return CacheService.getScriptCache(); }
 
   function key(prefix, email) { return prefix + Util.sha256(email).slice(0, 40); }
+
+  function dev(payload) { return Util.text(payload && payload.dispositivo, 120); }
 
   function requestCode(payload) {
     var email = Util.normEmail(payload && payload.email);
@@ -58,6 +62,8 @@ var Auth = (function () {
     if (Date.now() > rec.exp) { c.remove(k); throw new CtrlError('CODE_EXPIRED', 'Codice scaduto. Chiedine uno nuovo.'); }
     if (rec.h !== Util.sha256(email + ':' + code)) {
       rec.tries++;
+      Accessi.logSafe(email, rec.tries >= CODE_MAX_TRIES ? 'codici_esauriti' : 'codice_errato', 'ko', dev(payload),
+        'Tentativo ' + rec.tries + ' di ' + CODE_MAX_TRIES);
       if (rec.tries >= CODE_MAX_TRIES) {
         c.remove(k);
         throw new CtrlError('CODE_EXPIRED', 'Troppi tentativi. Chiedi un nuovo codice.');
@@ -68,7 +74,14 @@ var Auth = (function () {
     c.remove(k);
 
     var user = Users.byEmail(email);
-    if (!user || !Util.bool(user.attivo)) throw new CtrlError('FORBIDDEN', 'Accesso non autorizzato');
+    if (!user || !Util.bool(user.attivo)) {
+      if (user) Accessi.logSafe(email, 'accesso_negato', 'ko', dev(payload), 'Accesso disattivato');
+      throw new CtrlError('FORBIDDEN', 'Accesso non autorizzato');
+    }
+    if (Users.scaduto(user)) {
+      Accessi.logSafe(email, 'accesso_scaduto', 'scaduto', dev(payload), 'Valido fino al ' + (user.scade_il || '?'));
+      throw new CtrlError('FORBIDDEN', 'Accesso scaduto. Chiedi di riattivarlo a chi gestisce CTRL.');
+    }
 
     return Db.withLock(function () {
       var token = Util.newToken();
@@ -77,9 +90,10 @@ var Auth = (function () {
       Db.insert('sessioni', {
         hash: Util.sha256(token), email: email, creata: now,
         scade: Utilities.formatDate(exp, CTRL_TZ, "yyyy-MM-dd'T'HH:mm:ss"), ultimo_uso: now,
-        dispositivo: Util.text(payload.dispositivo, 120)
+        dispositivo: dev(payload)
       });
       Users.touchLogin(email);
+      Accessi.log(email, 'login', 'ok', dev(payload), '');
       return { token: token, utente: Users.publicProfile(Users.byEmail(email)) };
     });
   }
@@ -93,6 +107,7 @@ var Auth = (function () {
     if (s.scade < Util.nowIso()) throw new CtrlError('AUTH_REQUIRED', 'Sessione scaduta. Accedi di nuovo.');
     var user = Users.byEmail(s.email);
     if (!user || !Util.bool(user.attivo)) throw new CtrlError('AUTH_REQUIRED', 'Accesso revocato');
+    if (Users.scaduto(user)) throw new CtrlError('AUTH_REQUIRED', 'Accesso scaduto. Chiedi di riattivarlo a chi gestisce CTRL.');
     var touchLimit = Utilities.formatDate(new Date(Date.now() - TOUCH_EVERY_MIN * 60000), CTRL_TZ, "yyyy-MM-dd'T'HH:mm:ss");
     if (s.ultimo_uso < touchLimit) {
       try {
@@ -105,7 +120,12 @@ var Auth = (function () {
   function logout(token) {
     if (!token) return { ok: true };
     var h = Util.sha256(token);
-    Db.withLock(function () { Db.removeRow('sessioni', 'hash', h); });
+    Db.withLock(function () {
+      var s = Db.find('sessioni', 'hash', h);
+      if (!s) return;
+      Accessi.log(s.email, 'logout', 'ok', s.dispositivo, '');
+      Db.removeRow('sessioni', 'hash', h);
+    });
     return { ok: true };
   }
 
@@ -114,6 +134,48 @@ var Auth = (function () {
     var rows = Db.all('sessioni').filter(function (s) { return s.email === email; });
     rows.forEach(function (s) { Db.removeRow('sessioni', 'hash', s.hash); });
     return rows.length;
+  }
+
+  /** Sessioni valide di un utente, senza dati segreti: l'id è solo l'inizio dell'impronta. */
+  function sessionsOf(email) {
+    var now = Util.nowIso();
+    return Db.all('sessioni')
+      .filter(function (s) { return s.email === email && s.scade >= now; })
+      .sort(function (a, b) { return a.ultimo_uso < b.ultimo_uso ? 1 : -1; })
+      .map(function (s) { return { id: s.hash.slice(0, 16), creata: s.creata, ultimo_uso: s.ultimo_uso, dispositivo: s.dispositivo }; });
+  }
+
+  /** Chiude una sessione (id) o tutte quelle di un utente, su richiesta del proprietario. */
+  function revoke(actor, email, id) {
+    return Db.withLock(function () {
+      var n;
+      if (id) {
+        if (String(id).length < 8) throw new CtrlError('INVALID', 'Dispositivo non valido');
+        var hit = Db.all('sessioni').filter(function (s) { return s.email === email && s.hash.indexOf(String(id)) === 0; });
+        hit.forEach(function (s) { Db.removeRow('sessioni', 'hash', s.hash); });
+        n = hit.length;
+      } else {
+        n = revokeAll(email);
+      }
+      if (n) Accessi.log(email, 'disconnessione', 'ok', '', id ? 'Un dispositivo' : 'Tutti i dispositivi (' + n + ')', actor.email);
+      return { chiuse: n };
+    });
+  }
+
+  /** Chiude le sessioni di chi ha superato la scadenza (notte). */
+  function closeExpiredUsers() {
+    return Db.withLock(function () {
+      var tot = 0;
+      Db.all('utenti').forEach(function (u) {
+        if (!Users.scaduto(u)) return;
+        var n = revokeAll(u.email);
+        if (n) {
+          tot += n;
+          Accessi.log(u.email, 'accesso_scaduto', 'scaduto', '', 'Sessioni chiuse: ' + n + ' · valido fino al ' + (u.scade_il || '?'), 'sistema');
+        }
+      });
+      return tot;
+    });
   }
 
   /** Pulizia periodica delle sessioni scadute. */
@@ -128,5 +190,8 @@ var Auth = (function () {
     return n;
   }
 
-  return { requestCode: requestCode, verifyCode: verifyCode, current: current, logout: logout, revokeAll: revokeAll, purgeExpired: purgeExpired };
+  return {
+    requestCode: requestCode, verifyCode: verifyCode, current: current, logout: logout, revokeAll: revokeAll,
+    purgeExpired: purgeExpired, sessionsOf: sessionsOf, revoke: revoke, closeExpiredUsers: closeExpiredUsers
+  };
 })();

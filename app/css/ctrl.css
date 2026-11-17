@@ -175,6 +175,8 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.45; }
 .tag.danger { color: var(--danger); border-color: var(--danger); }
 .tag.today { color: var(--accent); border-color: var(--accent); }
 .tag.owner { color: var(--accent); border-color: var(--accent); }
+.tag.warn { color: var(--warn); border-color: var(--warn); }
+.tag.ok { color: var(--ok); border-color: var(--ok); }
 .empty { padding: 40px 20px; text-align: center; color: var(--mute); }
 
 /* ---------- dettaglio evento ---------- */
@@ -353,7 +355,7 @@ dialog.sheet .actions { display: flex; gap: 10px; justify-content: flex-end; fle
 .login .claim { color: var(--mute); margin: 0; }
 
 /* ---------- impostazioni ---------- */
-.settings { padding: 20px 16px 100px; max-width: 920px; margin: 0 auto; display: grid; gap: 18px; }
+.settings { padding: 20px 16px 100px; max-width: 920px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
 .settings h1 { margin: 0; font-size: 22px; }
 .ulist { display: grid; }
 .urow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
@@ -361,7 +363,35 @@ dialog.sheet .actions { display: flex; gap: 10px; justify-content: flex-end; fle
 .urow .who { min-width: 0; }
 .urow .who b { display: block; overflow: hidden; text-overflow: ellipsis; }
 .urow .who small { color: var(--mute); }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.uact { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+@media (max-width: 640px) {
+  .urow { grid-template-columns: minmax(0, 1fr); }
+  .uact { justify-content: flex-start; }
+}
+.btn.sm { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.filters button { border: 1px solid var(--line-strong); background: var(--surface); color: var(--mute); border-radius: 999px; padding: 5px 12px; min-height: 32px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.filters button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.req { display: grid; gap: 8px; padding: 14px 16px; border-top: 1px solid var(--line); }
+.req:first-of-type { border-top: 0; }
+.req .qt { margin: 0; padding: 7px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-s); font-size: 14px; overflow-wrap: anywhere; }
+.req .row .input { width: auto; min-height: 36px; }
+.sess { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
+.sess small { display: block; color: var(--mute); }
+.logbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.logbar .input { width: 190px; min-height: 36px; }
+.logwrap { overflow-x: auto; }
+.logtbl { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
+.logtbl th, .logtbl td { padding: 8px 12px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+.logtbl th { font: 600 11px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--mute); background: var(--surface-2); border-top: 0; white-space: nowrap; }
+.logtbl td.t { white-space: nowrap; color: var(--mute); font-variant-numeric: tabular-nums; }
+.logtbl td.dev { color: var(--mute); }
+.logtbl .e-ok { color: var(--ok); font-weight: 700; }
+.logtbl .e-ko, .logtbl .e-scaduto { color: var(--danger); font-weight: 700; }
+.logtbl .e-attesa { color: var(--warn); font-weight: 700; }
+.login .alt { text-align: center; }
+.login .alt button { background: none; border: 0; color: var(--accent); font-weight: 600; cursor: pointer; padding: 6px; }
 .lst { display: grid; gap: 6px; }
 .lst .it { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 4px; align-items: center; }
 .lst .it .input { min-height: 40px; }

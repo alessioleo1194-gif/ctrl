@@ -110,6 +110,18 @@ var Db = (function () {
     return true;
   }
 
+  /**
+   * Cancellazione fisica delle righe che soddisfano pred: solo per tabelle di servizio con scadenza
+   * (sessioni, registro accessi, richieste chiuse). Da chiamare dentro withLock. Ritorna quante righe toglie.
+   */
+  function removeWhere(name, pred) {
+    var t = read(name);
+    var rows = t.rows.filter(pred).sort(function (a, b) { return b._row - a._row; });
+    rows.forEach(function (r) { t.sheet.deleteRow(r._row); });
+    delete tableCache[name];
+    return rows.length;
+  }
+
   function clearCache() {
     tableCache = {};
     ssCache = null;
@@ -130,6 +142,6 @@ var Db = (function () {
 
   return {
     ss: ss, sheet: sheet, all: all, find: find, insert: insert, update: update,
-    removeRow: removeRow, clearCache: clearCache, withLock: withLock
+    removeRow: removeRow, removeWhere: removeWhere, clearCache: clearCache, withLock: withLock
   };
 })();

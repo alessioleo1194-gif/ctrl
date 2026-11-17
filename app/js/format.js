@@ -43,3 +43,25 @@ export function stamp(iso) {
   const [d, t] = iso.split('T');
   return `${shortDate(d)} ${t ? t.slice(0, 5) : ''}`.trim();
 }
+
+/** yyyy-mm-dd → dd/mm/yyyy. */
+export function dataIt(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso || '';
+}
+
+/** Sostituisce nel testo le date yyyy-mm-dd con dd/mm/yyyy. */
+export function dateNelTesto(t) {
+  return String(t || '').replace(/(\d{4})-(\d{2})-(\d{2})/g, '$3/$2/$1');
+}
+
+/** Descrizione breve di un dispositivo dal suo user agent, es. "iPhone · Safari". */
+export function dispositivo(ua) {
+  const s = String(ua || '');
+  if (!s) return '';
+  const os = /iPhone/.test(s) ? 'iPhone' : /iPad/.test(s) ? 'iPad' : /Android/.test(s) ? 'Android'
+    : /Windows/.test(s) ? 'Windows' : /Mac OS X|Macintosh/.test(s) ? 'Mac' : /CrOS/.test(s) ? 'ChromeOS' : /Linux/.test(s) ? 'Linux' : '';
+  const br = /Edg\//.test(s) ? 'Edge' : /OPR\//.test(s) ? 'Opera' : /Firefox|FxiOS/.test(s) ? 'Firefox'
+    : /Chrome|CriOS/.test(s) ? 'Chrome' : /Safari/.test(s) ? 'Safari' : '';
+  return [os, br].filter(Boolean).join(' · ') || s.slice(0, 30);
+}

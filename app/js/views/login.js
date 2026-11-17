@@ -38,9 +38,43 @@ export function renderLogin(root, onDone) {
     } },
     head('Centro di comando della produzione eventi.'),
     h('label', { class: 'field' }, h('span', {}, 'Email'), input),
-    btn, msg);
+    btn, msg,
+    h('div', { class: 'alt' }, h('button', { type: 'button', onclick: () => { email = input.value.trim().toLowerCase() || email; setMsg(''); stepRichiesta(); } }, 'Non hai ancora l\'accesso? Richiedilo')));
     box.replaceChildren(form);
     input.focus();
+  }
+
+  /** Richiesta di accesso: la risposta è sempre la stessa, esista o no un account con quell'email. */
+  function stepRichiesta() {
+    const mail = h('input', { class: 'input', type: 'email', name: 'email', autocomplete: 'email', inputmode: 'email', required: true, value: email, placeholder: 'nome@esempio.it' });
+    const nome = h('input', { class: 'input', name: 'nome', autocomplete: 'name', maxlength: '80' });
+    const testo = h('input', { class: 'input', name: 'messaggio', maxlength: '300', placeholder: 'Chi sei e perché ti serve' });
+    const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Invia richiesta');
+    const form = h('form', { class: 'box', novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      const v = mail.value.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return setMsg('Inserisci un indirizzo email valido.', true);
+      btn.disabled = true; btn.textContent = 'Invio…'; setMsg('');
+      try {
+        await api('accesso.richiedi', { email: v, nome: nome.value, messaggio: testo.value, dispositivo: navigator.userAgent.slice(0, 120) });
+        email = v;
+        box.replaceChildren(h('div', { class: 'box' },
+          head('Richiesta inviata'),
+          h('p', { class: 'help', role: 'status' }, 'Se l\'email è autorizzata riceverai il codice dal login. Quando la richiesta verrà approvata potrai accedere con il normale codice via email.'),
+          h('button', { class: 'btn block', type: 'button', onclick: () => { setMsg(''); stepEmail(); } }, 'Torna all\'accesso')));
+      } catch (err) {
+        setMsg(err.message, true);
+        btn.disabled = false; btn.textContent = 'Invia richiesta';
+      }
+    } },
+    head('Richiedi accesso a CTRL'),
+    h('label', { class: 'field' }, h('span', {}, 'La tua email'), mail),
+    h('label', { class: 'field' }, h('span', {}, 'Nome'), nome),
+    h('label', { class: 'field' }, h('span', {}, 'Messaggio (facoltativo)'), testo),
+    btn, msg,
+    h('div', { class: 'alt' }, h('button', { type: 'button', onclick: () => { setMsg(''); stepEmail(); } }, '← Torna al login')));
+    box.replaceChildren(form);
+    mail.focus();
   }
 
   function stepCode(info) {

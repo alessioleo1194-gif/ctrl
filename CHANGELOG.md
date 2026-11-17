@@ -1,5 +1,22 @@
 # Registro delle modifiche
 
+## 0.8.0 · Accessi: scadenza, richieste, registro, disconnessione remota (17/11/2026) · Fase 2 di 4
+
+- **Scadenza per utente**: campo "Accesso valido fino al" (ultimo giorno, ora italiana). Dal giorno dopo il login dice "Accesso scaduto",
+  le sessioni aperte non valgono più e ogni notte vengono chiuse. Il proprietario non scade mai. Una data non valida nel foglio vale "scaduto".
+  Nell'elenco: tag "Scade tra N giorni", "Scaduto il …", filtri Tutti / Attivi / In scadenza / Scaduti, pulsanti **+30 giorni** e **Riattiva +30 giorni**.
+- **Richieste di accesso**: dalla schermata di login chi non ha un account può chiederlo (email, nome, messaggio). La risposta è sempre la stessa,
+  esista o no l'account. Massimo 3 richieste all'ora in totale. Il proprietario riceve al più una email di avviso all'ora (senza testo scritto da chi richiede),
+  approva scegliendo ruolo (Production / Viewer) e durata, oppure rifiuta (stessa email bloccata 7 giorni). Non parte nessuna email alla persona.
+- **Registro accessi** (solo Owner): accessi, uscite, codici errati e accessi scaduti di utenti esistenti, richieste e loro esito, cambi di ruolo,
+  scadenza e stato, disconnessioni remote. Con filtri e ricerca. Mai codici, token né tentativi di email sconosciute; l'IP non è disponibile.
+  Si conserva 180 giorni, poi si cancella da solo (come le sessioni).
+- **Dispositivi connessi** per utente, con **disconnessione remota** di uno o di tutti (efficace alla richiesta successiva del dispositivo).
+- Layout impostazioni: la pagina non si allarga più su telefono.
+- Backend: tabelle nuove `richieste_accesso` e `accessi`, colonna `scade_il` in `utenti` (schema 5). Azioni nuove: `accesso.richiedi`, `accesso.richieste`,
+  `accesso.gestisci`, `accessi.list`, `utenti.proroga`, `utenti.sessioni`, `utenti.disconnetti`.
+  **Dopo aver aggiornato Apps Script, rilancia `setupProduzione` / `setupTest`** (crea le tabelle e la colonna, non tocca i dati).
+
 ## 0.7.0 · Ruoli OWNER / PRODUCTION / VIEWER (17/11/2026) · Fase 1 di 4
 
 - Ruoli nuovi, applicati dal server: **OWNER** (solo l'email `ADMIN_EMAIL`, non si assegna a nessuno e non si può declassare),

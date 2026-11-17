@@ -674,3 +674,128 @@ test('Save Changes: se il PDF non si crea il documento resta salvato e lo dice',
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page.locator('.save-ind')).toHaveText("Salvato · PDF aggiornato nell'evento", { timeout: 20000 });
 });
+
+// ---------------- Fase 2 · accessi ----------------
+
+test('accessi: richiesta dal login, approvazione con ruolo e scadenza, proroga, disconnessione remota, registro', async ({ page }, info) => {
+  const env = await setup(page);
+  // chi non ha ancora l'accesso lo chiede dalla schermata di login
+  await page.goto('/');
+  await page.getByRole('button', { name: /Richiedilo/ }).click();
+  await page.getByLabel('La tua email').fill('giulia@example.com');
+  await page.getByLabel('Nome').fill('Giulia Bianchi');
+  await page.getByLabel(/Messaggio/).fill('Sono la nuova stagista');
+  await page.getByRole('button', { name: 'Invia richiesta' }).click();
+  await expect(page.getByText('Se l\'email è autorizzata riceverai il codice dal login.')).toBeVisible();
+  expect(env.getSS(env.state.props.DB_ID).getSheetByName('richieste_accesso').rows().length).toBe(2);
+
+  // il proprietario la vede per prima e la approva come Production per 7 giorni
+  await login(page, env);
+  await page.getByRole('link', { name: 'Impostazioni' }).click();
+  const rich = page.locator('#richieste-accesso');
+  await expect(rich).toContainText('Giulia Bianchi');
+  await expect(rich).toContainText('Sono la nuova stagista');
+  await expect(rich.locator('.tag.warn')).toHaveText('1 in attesa');
+  await expect(page.locator('section.card').first()).toHaveAttribute('id', 'richieste-accesso');
+  await page.screenshot({ path: `test-results/accessi-richiesta-${info.project.name}.png`, fullPage: true });
+  await rich.getByLabel('Ruolo per giulia@example.com').selectOption('PRODUCTION');
+  await rich.getByLabel('Durata per giulia@example.com').selectOption('7');
+  await rich.getByRole('button', { name: 'Approva' }).click();
+  const riga = page.locator('.urow', { hasText: 'giulia@example.com' });
+  await expect(riga.locator('.tag', { hasText: 'Production' })).toBeVisible();
+  await expect(riga.locator('.tag.warn')).toContainText('Scade tra 7 giorni');
+  await expect(rich).toContainText('Nessuna richiesta in attesa');
+
+  // +30 giorni parte dalla data attuale
+  await riga.getByRole('button', { name: '+30 giorni' }).click();
+  const [y, m, d] = isoDay(37).split('-');
+  await expect(riga.locator('.tag', { hasText: `Scade il ${d}/${m}/${y}` })).toBeVisible();
+
+  // un dispositivo connesso: lo vedo e lo disconnetto da remoto
+  env.state.cache.clear();
+  apiCall(env, null, 'auth.requestCode', { email: 'giulia@example.com' });
+  const code = env.state.mails.at(-1).subject.match(/(\d{6})/)[1];
+  const tokGiulia = apiCall(env, null, 'auth.verifyCode', { email: 'giulia@example.com', code, dispositivo: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile Safari/604.1' });
+  const tg = JSON.parse(JSON.stringify(tokGiulia)).data.token;
+  await page.reload();
+  await expect(riga.getByText('1 dispositivo')).toBeVisible();
+  await riga.getByRole('button', { name: 'Modifica' }).click();
+  const dlg = page.locator('dialog.sheet');
+  await expect(dlg.getByText('iPhone · Safari')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Disconnetti' }).click();
+  await expect(dlg.getByText('Nessun dispositivo connesso.')).toBeVisible();
+  expect(apiCall(env, tg, 'auth.me', {}).ok).toBe(false);
+
+  // tolgo la scadenza dal form
+  await dlg.getByLabel('Accesso valido fino al').fill('');
+  await dlg.getByRole('button', { name: 'Salva' }).click();
+  await expect(riga.locator('.tag', { hasText: 'Nessuna scadenza' })).toBeVisible();
+
+  // il registro racconta tutto, con filtri e ricerca
+  const reg = page.locator('#registro-accessi');
+  await reg.getByRole('button', { name: 'Richieste', exact: true }).click();
+  await expect(reg).toContainText('Richiesta di accesso');
+  await expect(reg).toContainText('Richiesta di giulia@example.com approvata');
+  await reg.getByRole('button', { name: 'Amministrazione' }).click();
+  await expect(reg).toContainText('Disconnessione remota di giulia@example.com');
+  await expect(reg).toContainText('Scadenza di giulia@example.com');
+  await reg.getByRole('button', { name: 'Tutto' }).click();
+  await reg.getByLabel('Cerca nel registro').fill('giulia');
+  await expect(reg.locator('tbody tr').first()).toContainText('giulia');
+  await expect(reg).toContainText('iPhone · Safari');
+  await expect(reg).toContainText('Si conservano 180 giorni');
+  await noHorizontalScroll(page);
+  await page.screenshot({ path: `test-results/accessi-registro-${info.project.name}.png`, fullPage: true });
+});
+
+test('accessi: un utente scaduto vede "Accesso scaduto" al login; il proprietario lo riattiva con un tocco; filtri utenti', async ({ page }, info) => {
+  const env = await setup(page);
+  const adm = tokenFor(env, ADMIN);
+  apiCall(env, adm, 'utenti.save', { email: 'ospite@example.com', nome: 'Ospite sala', ruolo: 'VIEWER', scade_il: isoDay(-1) });
+  apiCall(env, adm, 'utenti.save', { email: 'fonico@example.com', nome: 'Fonico serata', ruolo: 'VIEWER', scade_il: isoDay(3) });
+  apiCall(env, adm, 'utenti.save', { email: 'manuel@example.com', nome: 'Manuel R.', ruolo: 'PRODUCTION' });
+
+  env.state.cache.clear();
+  await page.goto('/');
+  await page.getByLabel('Email').fill('ospite@example.com');
+  await page.getByRole('button', { name: 'Invia codice' }).click();
+  await expect(page.getByText('Codice inviato a ospite@example.com')).toBeVisible();
+  const code = env.state.mails.at(-1).subject.match(/(\d{6})/)[1];
+  await page.getByLabel('Codice di accesso').fill(code);
+  await expect(page.getByText(/Accesso scaduto/)).toBeVisible();
+  await page.screenshot({ path: `test-results/accessi-scaduto-${info.project.name}.png` });
+
+  await login(page, env);
+  await page.getByRole('link', { name: 'Impostazioni' }).click();
+  const utenti = page.locator('section.card', { hasText: 'Aggiungi utente' });
+  await expect(utenti.locator('.urow', { hasText: 'ospite@example.com' }).locator('.tag.danger')).toContainText('Scaduto il');
+  await utenti.getByRole('button', { name: 'In scadenza' }).click();
+  await expect(utenti.locator('.urow')).toHaveCount(1);
+  await expect(utenti.locator('.urow')).toContainText('Fonico serata');
+  await expect(utenti.locator('.urow .tag.warn')).toContainText('Scade tra 3 giorni');
+  await utenti.getByRole('button', { name: 'Scaduti' }).click();
+  await expect(utenti.locator('.urow')).toHaveCount(1);
+  await utenti.getByRole('button', { name: 'Riattiva +30 giorni' }).click();
+  await expect(utenti.getByRole('button', { name: 'Scaduti' })).toBeVisible();
+  await utenti.getByRole('button', { name: 'Scaduti' }).click();
+  await expect(utenti.getByText('Nessun utente in questo filtro')).toBeVisible();
+  await utenti.getByRole('button', { name: 'Tutti' }).click();
+  await expect(utenti.locator('.urow', { hasText: 'ospite@example.com' }).locator('.tag')).toContainText(['Viewer', `Scade il ${isoDay(30).split('-').reverse().join('/')}`]);
+
+  const reg = page.locator('#registro-accessi');
+  await reg.getByRole('button', { name: 'Problemi' }).click();
+  await expect(reg).toContainText('Accesso scaduto: login rifiutato');
+  await noHorizontalScroll(page);
+});
+
+test('accessi: Production e Viewer non vedono richieste né registro e le azioni sono rifiutate dal server', async ({ page }) => {
+  const env = await setup(page);
+  const adm = tokenFor(env, ADMIN);
+  apiCall(env, adm, 'utenti.save', { email: 'manuel@example.com', nome: 'Manuel', ruolo: 'PRODUCTION' });
+  await login(page, env, 'manuel@example.com');
+  await expect(page.getByRole('link', { name: 'Impostazioni' })).toHaveCount(0);
+  const tok = tokenFor(env, 'manuel@example.com');
+  for (const [azione, payload] of [['accesso.richieste', {}], ['accesso.gestisci', { id: 'x', azione: 'rifiuta' }], ['accessi.list', {}], ['utenti.sessioni', { email: ADMIN }], ['utenti.disconnetti', { email: ADMIN }], ['utenti.proroga', { email: ADMIN, giorni: 7 }]]) {
+    expect(JSON.parse(JSON.stringify(apiCall(env, tok, azione, payload))).error.code, azione).toBe('FORBIDDEN');
+  }
+});

@@ -6,7 +6,7 @@
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 4;
+var SCHEMA_VERSION = 5;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -38,11 +38,16 @@ var SCHEMA = {
   // documenti operativi di una produzione (Production Plan, Material List): JSON spezzato in parti
   documenti: ['id', 'progetto_id', 'tipo', 'versione', 'parti', 'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'eliminato'],
   documenti_parti: ['id', 'documento_id', 'n', 'testo'],
+  // scade_il: ultimo giorno di accesso (yyyy-MM-dd, ora italiana); vuoto = nessuna scadenza
   utenti: ['id', 'email', 'nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo', 'creato_il',
-    'aggiornato_il', 'versione', 'ultimo_accesso'],
+    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il'],
   sessioni: ['hash', 'email', 'creata', 'scade', 'ultimo_uso', 'dispositivo'],
   condivisioni: ['id', 'hash', 'eventi', 'sezioni', 'mostra_contatti', 'scade', 'revocato', 'creato_da',
     'creato_il', 'ultimo_accesso', 'etichetta'],
+  // richieste di accesso fatte da chi non ha ancora un account (stato: in_attesa, approvata, rifiutata)
+  richieste_accesso: ['id', 'email', 'nome', 'messaggio', 'creata_il', 'stato', 'gestita_il', 'gestita_da', 'ruolo', 'scade_il'],
+  // registro accessi: solo aggiunta, le righe oltre 180 giorni si cancellano da sole (come le sessioni)
+  accessi: ['ts', 'email', 'evento', 'esito', 'dispositivo', 'dettaglio', 'attore'],
   storico: ['ts', 'email', 'evento_id', 'sezione', 'azione', 'rif_id', 'prima', 'dopo'],
   config: ['chiave', 'valore', 'aggiornato_il']
 };
