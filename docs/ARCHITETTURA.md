@@ -31,7 +31,9 @@ In alto compare il badge **TEST** quando si è sull'ambiente di prova.
   (`scade_il`); richieste di accesso, registro accessi e dispositivi connessi sono in `13_Accessi.js` e `14_Richieste.js`.
 - Staff (`15_Staff.js`): chi non è assegnato a un evento ne vede i dati ma non documenti, file e note; il controllo è nel
   backend (`Staff.richiediEvento` / `richiediProduzione`), non solo nell'interfaccia.
-- Cambiare ruolo o disattivare un utente chiude subito le sue sessioni.
+- Cambiare ruolo, email o stato, sospendere o eliminare un utente chiude subito le sue sessioni. L'eliminazione è logica
+  (`utenti.eliminato`): la riga resta per lo Storico. Permessi particolari in `utenti.permessi_extra` (JSON: `tutti_documenti`,
+  `carica`, `modifica`), applicati da `Users.perms`; l'Owner ha sempre tutto e non è modificabile. Il nome dell'Owner è sempre "Alessio Leo".
 - Errori interni: al frontend arriva solo un messaggio generico, i dettagli restano nel registro di Apps Script.
 - Netlify invia intestazioni di sicurezza (Content-Security-Policy, niente iframe, niente referrer): vedi `netlify.toml`.
 
@@ -59,6 +61,9 @@ Excel con `tsv.js`, annulla/ripeti, elenchi filtrati); `views/plan.js` e `views/
 (`views/doc.js`) usa `documento-dati.js` per anteprima, testo copiato e PDF (`pdf.js`, jsPDF in `app/vendor`, caricato solo quando serve).
 Nel Plan la colonna Section vale per tutte le righe sotto finché non ne scrivi un'altra (si parte da Pre Show);
 le righe restano dove le scrivi, "Sort by time" le ordina, il documento è sempre ordinato per orario.
+
+Telefono: sotto i 700 px `creaGriglia` (grid.js) restituisce `creaRigheMobile` (`righe-mobile.js`): elenco di righe e editor
+a schermo intero, stesse opzioni e stessi dati del foglio a celle (che resta su tablet e desktop).
 
 Staff e assegnazioni (`15_Staff.js`, tabella `assegnazioni`): solo l'Owner assegna. Dalla descrizione del Calendar nascono
 **proposte**: CTRL cerca nel testo il "nome in calendario" di ogni utente attivo e non scaduto (`utenti.nome_calendario`,

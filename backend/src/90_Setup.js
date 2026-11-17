@@ -81,13 +81,14 @@ function setup_(env) {
   Db.clearCache();
   if (!Db.find('utenti', 'email', props.ADMIN_EMAIL)) {
     Db.insert('utenti', {
-      id: Util.newId('usr'), email: props.ADMIN_EMAIL, nome: 'Admin', ruolo: 'OWNER', puo_caricare: 'TRUE',
+      id: Util.newId('usr'), email: props.ADMIN_EMAIL, nome: Users.nomeOwner(''), ruolo: 'OWNER', puo_caricare: 'TRUE',
       puo_modificare: 'TRUE', attivo: 'TRUE', creato_il: Util.nowIso(), aggiornato_il: Util.nowIso(), versione: '1'
     });
     log.push('Creato proprietario ' + props.ADMIN_EMAIL);
   }
   migraRuoli_(log);
   migraColori_(log);
+  migraNomeOwner_(log);
   if (!Settings.getRaw('schema_versione')) Settings.setRaw('schema_versione', String(SCHEMA_VERSION));
 
   installTriggers_();
@@ -172,3 +173,14 @@ var Backup = (function () {
   }
   return { run: run };
 })();
+
+/** Il proprietario si chiama col suo nome (non "Admin" o "Owner"): lo vedono anche gli altri tecnici. Idempotente. */
+function migraNomeOwner_(log) {
+  Db.clearCache();
+  var u = Db.find('utenti', 'email', Util.normEmail(Users.adminEmail()));
+  if (!u) return;
+  var nome = Users.nomeOwner(u.nome);
+  if (nome === String(u.nome || '').trim()) return;
+  Db.update('utenti', 'email', u.email, { nome: nome, aggiornato_il: Util.nowIso() }, null, true);
+  log.push('Nome del proprietario: ' + nome);
+}

@@ -80,7 +80,8 @@ function usersCard(users, reload) {
         h('div', { class: 'chips' },
           h('span', { class: 'tag' + (u.ruolo === 'OWNER' ? ' owner' : '') }, RUOLI[u.ruolo] || u.ruolo),
           u.protetto ? h('span', { class: 'help' }, 'Non modificabile · nessuna scadenza') : null,
-          !u.attivo ? h('span', { class: 'tag danger' }, 'Disattivato') : null,
+          !u.attivo ? h('span', { class: 'tag danger' }, 'Sospeso') : null,
+          u.permessi_extra && u.permessi_extra.length ? h('span', { class: 'tag acc', title: u.permessi_extra.map(k => PERMESSI_EXTRA[k]).join(' · ') }, 'Permessi particolari') : null,
           scadenzaTag(u),
           h('span', { class: 'help' }, u.ultimo_accesso ? 'ultimo accesso ' + stamp(u.ultimo_accesso) : 'mai acceduto'),
           u.sessioni ? h('span', { class: 'help' }, u.sessioni === 1 ? '· 1 dispositivo' : `· ${u.sessioni} dispositivi`) : null)),
@@ -96,14 +97,28 @@ function usersCard(users, reload) {
     list);
 }
 
+const PERMESSI_EXTRA = {
+  tutti_documenti: 'Vede i documenti di tutti gli eventi',
+  carica: 'Può caricare file',
+  modifica: 'Può modificare Plan e Material List'
+};
+
 function userForm(u, reload) {
-  const v = u || { email: '', nome: '', ruolo: 'VIEWER', attivo: true, scade_il: '', nome_calendario: '', colore: '' };
+  const v = u || { email: '', nome: '', ruolo: 'VIEWER', attivo: true, scade_il: '', nome_calendario: '', colore: '', permessi_extra: [] };
   const err = h('div', { class: 'err', role: 'alert' });
-  const email = h('input', { class: 'input', type: 'email', value: v.email, disabled: !!u, required: true, autocomplete: 'off' });
-  const nome = h('input', { class: 'input', value: v.nome || '', maxlength: 80 });
+  const email = h('input', { class: 'input', type: 'email', value: v.email, disabled: !!v.protetto, required: true, autocomplete: 'off', autocapitalize: 'off' });
+  const avvisoEmail = h('p', { class: 'help', hidden: true }, 'Cambiando l\'email le sue sessioni si chiudono e dovrà entrare con quella nuova. Profilo, colore, eventi e storico restano gli stessi.');
+  email.addEventListener('input', () => { avvisoEmail.hidden = !u || email.value.trim().toLowerCase() === u.email; });
+  const nome = h('input', { class: 'input', value: v.nome || '', maxlength: 80, autocomplete: 'off' });
   const ruolo = h('select', { class: 'input', disabled: !!v.protetto }, Object.entries(RUOLI_FORM).map(([k, l]) => h('option', { value: k, selected: k === v.ruolo }, l)));
-  const attivo = h('input', { type: 'checkbox', checked: v.attivo !== false, disabled: !!v.protetto });
+  let attivo = v.attivo !== false;
+  const statoBtns = [['true', 'Attivo'], ['false', 'Sospeso']].map(([k, l]) => h('button', { type: 'button', class: 'seg-b', 'aria-pressed': String((k === 'true') === attivo), disabled: !!v.protetto, onclick: () => {
+    attivo = k === 'true';
+    statoBtns.forEach(b => b.setAttribute('aria-pressed', String((b.dataset.k === 'true') === attivo)));
+  }, 'data-k': k }, l));
+  const stato = h('div', { class: 'seg stato', role: 'group', 'aria-label': 'Stato' }, statoBtns);
   const scade = h('input', { class: 'input', type: 'date', value: v.scade_il || '', disabled: !!v.protetto });
+  const extra = Object.entries(PERMESSI_EXTRA).map(([k, l]) => ({ k, l, input: h('input', { type: 'checkbox', checked: (v.permessi_extra || []).includes(k) }) }));
   const nomeCal = h('input', { class: 'input', value: v.nome_calendario || '', maxlength: 200, placeholder: 'Es. Marco, M. Serra', autocomplete: 'off' });
   let colore = v.colore || '';
   const swatches = h('div', { class: 'swatches', role: 'group', 'aria-label': 'Colore' },
@@ -113,28 +128,53 @@ function userForm(u, reload) {
     } })));
   const save = h('button', { class: 'btn primary', type: 'submit' }, 'Salva');
   const disp = h('div', { class: 'disp' });
+  // eliminare: due tocchi, il secondo conferma (nessun popup del browser)
+  const elimina = h('button', { class: 'btn danger', type: 'button', onclick: () => {
+    const conferma = h('button', { class: 'btn danger', type: 'button', onclick: async () => {
+      conferma.disabled = true; err.textContent = '';
+      try {
+        await api('utenti.elimina', { email: u.email });
+        dlg.close(); toast(`${u.nome || u.email} eliminato`); reload();
+      } catch (x) { err.textContent = x.message; conferma.disabled = false; }
+    } }, 'Conferma: elimina ' + (u.nome || u.email));
+    const annulla = h('button', { class: 'btn', type: 'button', onclick: () => riga.replaceChildren(elimina) }, 'Annulla');
+    riga.replaceChildren(conferma, annulla);
+  } }, 'Elimina utente');
+  const riga = h('div', { class: 'elimina' }, elimina);
   const form = h('form', { novalidate: true, onsubmit: async (e) => {
     e.preventDefault();
     save.disabled = true; err.textContent = '';
     try {
-      await api('utenti.save', { email: email.value, nome: nome.value, ruolo: ruolo.value, attivo: attivo.checked, scade_il: scade.value, nome_calendario: nomeCal.value, colore: colore || undefined, versione: u ? u.versione : undefined });
+      const nuova = email.value.trim().toLowerCase();
+      const dati = { email: u ? u.email : email.value, nome: nome.value, ruolo: ruolo.value, attivo, scade_il: scade.value, nome_calendario: nomeCal.value, colore: colore || undefined, versione: u ? u.versione : undefined };
+      if (u && !v.protetto && nuova !== u.email) dati.email_nuova = nuova;
+      if (!v.protetto) dati.permessi_extra = extra.filter(x => x.input.checked).map(x => x.k);
+      await api('utenti.save', dati);
       dlg.close(); toast('Utente salvato'); reload();
     } catch (x) { err.textContent = x.message; save.disabled = false; }
   } },
   h('h2', {}, u ? 'Modifica utente' : 'Nuovo utente'),
+  h('label', { class: 'field' }, h('span', {}, 'Nome e cognome'), nome),
+  h('p', { class: 'help' }, 'Come lo vedono gli altri sulle card degli eventi.'),
   h('label', { class: 'field' }, h('span', {}, 'Email'), email),
-  h('label', { class: 'field' }, h('span', {}, 'Nome'), nome),
+  avvisoEmail,
+  h('label', { class: 'field' }, h('span', {}, 'Ruolo'), ruolo),
+  h('div', { class: 'field' }, h('span', {}, 'Stato'), stato),
+  h('label', { class: 'field' }, h('span', {}, 'Accesso valido fino al'), scade),
+  h('p', { class: 'help' }, 'Vuoto = nessuna scadenza. L\'accesso termina a fine giornata (ora italiana): il giorno dopo la sessione si chiude e il login dice "Accesso scaduto".'),
+  v.protetto ? null : h('fieldset', { class: 'perm' },
+    h('legend', {}, 'Permessi particolari'),
+    h('p', { class: 'help' }, 'Eccezioni al ruolo, spente di default. Valgono subito, anche per chi è già dentro.'),
+    ...extra.map(x => h('label', { class: 'switch' }, h('span', {}, x.l), x.input))),
   h('label', { class: 'field' }, h('span', {}, 'Nome in calendario'), nomeCal),
   h('p', { class: 'help' }, 'Come ti scrivono nelle descrizioni del Calendar, separati da virgola (es. "Marco, M. Serra"). Serve a proporre lo staff di un evento; vuoto = si prova con il primo nome. Maiuscole e accenti non contano.'),
   h('div', { class: 'field' }, h('span', {}, 'Colore'), swatches),
   h('p', { class: 'help' }, u ? 'Il colore con cui compare il nome sulle card degli eventi.' : 'Il colore con cui compare il nome sulle card. Se non scegli, ne viene dato uno automaticamente (il meno usato).'),
-  h('label', { class: 'field' }, h('span', {}, 'Ruolo'), ruolo),
-  h('label', { class: 'field' }, h('span', {}, 'Accesso valido fino al'), scade),
-  h('p', { class: 'help' }, 'Vuoto = nessuna scadenza. L\'accesso termina a fine giornata (ora italiana): il giorno dopo la sessione si chiude e il login dice "Accesso scaduto".'),
-  h('label', { class: 'switch' }, h('span', {}, 'Accesso attivo'), attivo),
-  v.protetto ? h('p', { class: 'help' }, 'Owner: ruolo, scadenza e accesso non modificabili.') : h('p', { class: 'help' }, 'Il ruolo Owner non si assegna: è solo del proprietario. Se riduci i permessi o disattivi l\'accesso, la persona viene disconnessa subito.'),
+  v.protetto ? h('p', { class: 'help' }, 'Owner: ruolo, scadenza, stato ed email non modificabili.') : h('p', { class: 'help' }, 'Il ruolo Owner non si assegna: è solo del proprietario. Se riduci i permessi o sospendi l\'accesso, la persona viene disconnessa subito.'),
   u && !v.protetto ? disp : null,
   err,
+  u && !v.protetto ? h('div', { class: 'help' }, 'Eliminare non cancella lo storico: la persona non può più entrare e sparisce dall\'elenco e dagli eventi. Puoi registrare di nuovo la stessa email in seguito.') : null,
+  u && !v.protetto ? riga : null,
   h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', onclick: () => dlg.close() }, 'Annulla'), save));
   const dlg = sheet(form);
   if (u && !v.protetto) dispositivi(disp, u);
@@ -206,7 +246,10 @@ const EVENTI_LOG = {
   scadenza: (r) => `Scadenza di ${r.email}: ${dateNelTesto(r.dettaglio)}`,
   disattivato: (r) => `Accesso disattivato a ${r.email}`,
   riattivato: (r) => `Accesso riattivato a ${r.email}`,
-  disconnessione: (r) => `Disconnessione remota di ${r.email}: ${(r.dettaglio || '').toLowerCase()}`
+  disconnessione: (r) => `Disconnessione remota di ${r.email}: ${(r.dettaglio || '').toLowerCase()}`,
+  email_cambiata: (r) => `Email cambiata: ${r.dettaglio}`,
+  permessi: (r) => `Permessi particolari di ${r.email}: ${r.dettaglio}`,
+  eliminato: (r) => `Utente ${r.email} eliminato${r.dettaglio ? ' · ' + r.dettaglio : ''}`
 };
 const ESITI_LOG = { ok: 'OK', ko: 'Rifiutato', attesa: 'In attesa', scaduto: 'Scaduto' };
 const FILTRI_LOG = [['tutto', 'Tutto'], ['accessi', 'Accessi'], ['problemi', 'Problemi'], ['richieste', 'Richieste'], ['amministrazione', 'Amministrazione']];

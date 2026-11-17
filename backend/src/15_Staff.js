@@ -61,7 +61,7 @@ var Staff = (function () {
   /** Utenti che possono essere assegnati: attivi e non scaduti. */
   function utentiAttivi() {
     return Db.all('utenti').filter(function (u) {
-      return (Util.bool(u.attivo) || Util.normEmail(u.email) === Users.adminEmail()) && !Users.scaduto(u);
+      return !Util.bool(u.eliminato) && (Util.bool(u.attivo) || Util.normEmail(u.email) === Users.adminEmail()) && !Users.scaduto(u);
     });
   }
 
@@ -143,6 +143,8 @@ var Staff = (function () {
    */
   function contesto(user) {
     if (!user || Users.can(user, 'admin')) return { tutto: true, consente: function () { return true; }, produzione: function () { return true; } };
+    // permesso particolare "vede tutti i documenti": accesso a ogni evento, ma non è l'Owner (niente proposte da confermare)
+    var tuttiDoc = Users.can(user, 'vedereTutto');
     var mie = {}, prod = {};
     var eventi = {};
     Db.all('eventi').forEach(function (e) { eventi[e.id] = e; });
@@ -155,8 +157,8 @@ var Staff = (function () {
     return {
       tutto: false,
       assegnato: function (eventoId) { return !!mie[eventoId]; },
-      consente: function (e) { return !!(e && (mie[e.id] || (e.progetto_id && prod[e.progetto_id]))); },
-      produzione: function (pid) { return !!prod[pid]; }
+      consente: function (e) { return !!(e && (tuttiDoc || mie[e.id] || (e.progetto_id && prod[e.progetto_id]))); },
+      produzione: function (pid) { return tuttiDoc || !!prod[pid]; }
     };
   }
 
@@ -172,6 +174,7 @@ var Staff = (function () {
 
   // ---------- vista per le liste di eventi ----------
   function nomeDi(u) {
+    if (Util.normEmail(u.email) === Users.adminEmail()) return Users.nomeOwner(u.nome);
     return String(u.nome || '').trim() || String(u.email || '').split('@')[0];
   }
 

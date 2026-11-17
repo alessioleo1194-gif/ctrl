@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.9.0
+ * CTRL API · versione 0.10.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.9.0';
+var CTRL_VERSION = '0.10.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -190,7 +190,7 @@ var Util = (function () {
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 6;
+var SCHEMA_VERSION = 7;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -226,7 +226,9 @@ var SCHEMA = {
   // nome_calendario: come la persona compare nelle descrizioni del Calendar (alias separati da virgola)
   // colore: uno di COLORI_UTENTE, uguale per la stessa persona ovunque nell'interfaccia
   utenti: ['id', 'email', 'nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo', 'creato_il',
-    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il', 'nome_calendario', 'colore'],
+    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il', 'nome_calendario', 'colore',
+    // permessi_extra: eccezioni al ruolo, separate da virgola (tutti_documenti, carica, modifica). eliminato: TRUE = utente tolto (riga conservata).
+    'permessi_extra', 'eliminato', 'eliminato_il'],
   // staff assegnato agli eventi. stato: proposta (da confermare), confermata, scartata, rimossa, decaduta.
   // origine: calendario (trovato nella descrizione) o manuale. trovato/termine: dove e cosa è stato trovato.
   assegnazioni: ['id', 'evento_id', 'email', 'stato', 'origine', 'trovato', 'termine', 'creata_il', 'creata_da',
@@ -653,11 +655,19 @@ var Auth = (function () {
  * - PRODUCTION: vede tutto, scarica i PDF, carica file, crea e modifica Production Plan e Material List.
  * - VIEWER: vede e scarica, non modifica nulla.
  * Ogni utente (tranne il proprietario) può avere una scadenza: scade_il è l'ultimo giorno di accesso (ora italiana).
+ * Permessi particolari (permessi_extra): eccezioni al ruolo, spente di default. tutti_documenti = vede documenti, file e note
+ * di ogni evento anche senza assegnazione; carica = può caricare file; modifica = può modificare Plan e Material List.
+ * Eliminare un utente non cancella la riga: eliminato = TRUE, non può entrare, sparisce da elenco ed eventi.
  * Dal giorno dopo l'accesso è rifiutato e le sessioni vengono chiuse. Una data non valida nel foglio vale "scaduto".
  * I valori vecchi nel foglio (ADMIN, COLLABORATORE, LETTURA) vengono letti come i nuovi: ADMIN diverso dal proprietario
  * vale PRODUCTION, COLLABORATORE con puo_modificare vale PRODUCTION, gli altri VIEWER. Il setup li riscrive.
  */
 var Users = (function () {
+  /** Nome mostrato per il proprietario (così gli altri sanno chi è, non vedono "admin"). */
+  var NOME_OWNER = 'Alessio Leo';
+  var NOMI_GENERICI = ['', 'admin', 'owner', 'amministratore', 'administrator'];
+  var PERMESSI_EXTRA = ['tutti_documenti', 'carica', 'modifica'];
+
   function adminEmail() { return Util.normEmail(Config.get('ADMIN_EMAIL', '')); }
 
   /** Ruolo effettivo di una riga utente: il proprietario è sempre OWNER, nessun altro lo è mai. */
@@ -682,28 +692,42 @@ var Users = (function () {
     return !Util.isDate(s) || Util.today() > s;
   }
 
+  /** Il proprietario si presenta col suo nome, mai come "Admin" o "Owner". */
+  function nomeOwner_(nome) {
+    return NOMI_GENERICI.indexOf(String(nome || '').trim().toLowerCase()) >= 0 ? NOME_OWNER : String(nome).trim();
+  }
+
   function byEmail(email) {
     var e = Util.normEmail(email);
     var u = Db.find('utenti', 'email', e);
     if (!u && e && e === adminEmail()) {
-      return { id: 'usr_admin', email: e, nome: 'Owner', ruolo: 'OWNER', attivo: 'TRUE' };
+      return { id: 'usr_admin', email: e, nome: NOME_OWNER, ruolo: 'OWNER', attivo: 'TRUE' };
     }
+    if (u && Util.bool(u.eliminato) && e !== adminEmail()) return undefined;
     if (u) {
       u = JSON.parse(JSON.stringify(u));
       u.ruolo = ruoloDi(u);
-      if (e === adminEmail()) u.attivo = 'TRUE';
+      if (e === adminEmail()) { u.attivo = 'TRUE'; u.nome = nomeOwner_(u.nome); }
     }
     return u;
+  }
+
+  /** Permessi particolari validi di una riga utente. */
+  function extraDi(u) {
+    return String((u && u.permessi_extra) || '').split(',').map(function (x) { return x.trim(); })
+      .filter(function (x) { return PERMESSI_EXTRA.indexOf(x) >= 0; });
   }
 
   function perms(u) {
     var admin = u.ruolo === 'OWNER';
     var prod = u.ruolo === 'PRODUCTION';
+    var extra = admin ? [] : extraDi(u);
     return {
       admin: admin,
       vedere: true,
-      caricare: admin || prod,
-      modificare: admin || prod,
+      caricare: admin || prod || extra.indexOf('carica') >= 0,
+      modificare: admin || prod || extra.indexOf('modifica') >= 0,
+      vedereTutto: admin || extra.indexOf('tutti_documenti') >= 0,
       creareEventi: admin,
       condividere: admin,
       cestinare: admin,
@@ -734,7 +758,7 @@ var Users = (function () {
     var usi = {};
     COLORI_UTENTE.forEach(function (c) { usi[c] = 0; });
     Db.all('utenti').forEach(function (u) {
-      if (Util.normEmail(u.email) === escludiEmail) return;
+      if (Util.normEmail(u.email) === escludiEmail || Util.bool(u.eliminato)) return;
       if (usi.hasOwnProperty(u.colore)) usi[u.colore]++;
     });
     return COLORI_UTENTE.slice().sort(function (a, b) { return usi[a] - usi[b] || COLORI_UTENTE.indexOf(a) - COLORI_UTENTE.indexOf(b); })[0];
@@ -746,7 +770,8 @@ var Users = (function () {
 
   function touchLogin(email) {
     var u = Db.find('utenti', 'email', email);
-    if (u) Db.update('utenti', 'email', email, { ultimo_accesso: Util.nowIso() });
+    // ultimo_accesso è un dato tecnico: non deve invalidare la scheda che l'Owner ha aperto (keepVersion)
+    if (u) Db.update('utenti', 'email', email, { ultimo_accesso: Util.nowIso() }, null, true);
   }
 
   function list(actor) {
@@ -755,22 +780,37 @@ var Users = (function () {
     var sessioni = {};
     Db.all('sessioni').forEach(function (x) { if (x.scade >= now) sessioni[x.email] = (sessioni[x.email] || 0) + 1; });
     var oggi = Util.today();
-    return Db.all('utenti').map(function (u) {
+    return Db.all('utenti').filter(function (u) { return !Util.bool(u.eliminato); }).map(function (u) {
       var owner = ruoloDi(u) === 'OWNER';
       var scade = owner ? '' : (u.scade_il || '');
       var valida = Util.isDate(scade);
       return {
-        id: u.id, email: u.email, nome: u.nome, ruolo: ruoloDi(u),
+        id: u.id, email: u.email, nome: owner ? nomeOwner_(u.nome) : u.nome, ruolo: ruoloDi(u),
         attivo: Util.bool(u.attivo) || u.email === adminEmail(), ultimo_accesso: u.ultimo_accesso, versione: u.versione,
         protetto: u.email === adminEmail(),
         scade_il: scade, scaduto: scaduto(u), giorni_rimasti: valida && !scaduto(u) ? Util.diffDays(oggi, scade) : null,
         sessioni: sessioni[u.email] || 0,
-        nome_calendario: u.nome_calendario || '', colore: coloreDi(u)
+        nome_calendario: u.nome_calendario || '', colore: coloreDi(u),
+        permessi_extra: owner ? [] : extraDi(u)
       };
     }).sort(function (a, b) { return a.email < b.email ? -1 : 1; });
   }
 
-  /** Crea o aggiorna un utente. */
+  var ETICHETTE_EXTRA = { tutti_documenti: 'vede tutti i documenti', carica: 'carica file', modifica: 'modifica Plan e Material' };
+
+  function elencoExtra_(v) {
+    var l = String(v || '').split(',').filter(Boolean).map(function (x) { return ETICHETTE_EXTRA[x] || x; });
+    return l.length ? l.join(', ') : 'nessuno';
+  }
+
+  /** Lista pulita dei permessi particolari: solo valori noti, senza doppi, in ordine fisso. */
+  function normExtra_(v) {
+    if (!Array.isArray(v)) throw new CtrlError('INVALID', 'Permessi particolari non validi');
+    v.forEach(function (x) { if (PERMESSI_EXTRA.indexOf(String(x)) < 0) throw new CtrlError('INVALID', 'Permesso non valido'); });
+    return PERMESSI_EXTRA.filter(function (x) { return v.indexOf(x) >= 0; });
+  }
+
+  /** Crea o aggiorna un utente. Con email_nuova cambia l'email dello stesso profilo. */
   function save(actor, p) {
     require_(actor, 'impostazioni');
     var email = Util.normEmail(p.email);
@@ -783,6 +823,18 @@ var Users = (function () {
       throw new CtrlError('INVALID', 'Il ruolo OWNER è riservato al proprietario di CTRL');
     } else if (RUOLI_ASSEGNABILI.indexOf(ruolo) < 0) {
       throw new CtrlError('INVALID', 'Ruolo non valido');
+    }
+    var nuovaEmail = '';
+    if (p.email_nuova !== undefined && p.email_nuova !== null && Util.normEmail(p.email_nuova) !== email) {
+      nuovaEmail = Util.normEmail(p.email_nuova);
+      if (isAdminMail) throw new CtrlError('INVALID', 'L\'email del proprietario non si cambia');
+      if (!Util.isEmail(nuovaEmail)) throw new CtrlError('INVALID', 'Nuova email non valida');
+      if (nuovaEmail === adminEmail()) throw new CtrlError('INVALID', 'Questa email è riservata al proprietario');
+    }
+    var extra;
+    if (p.permessi_extra !== undefined) {
+      extra = normExtra_(p.permessi_extra);
+      if (isAdminMail && extra.length) throw new CtrlError('INVALID', 'Il proprietario ha già tutti i permessi');
     }
     var scade;
     if (p.scade_il !== undefined) {
@@ -805,26 +857,44 @@ var Users = (function () {
       aggiornato_il: Util.nowIso()
     };
     if (scade !== undefined) fields.scade_il = scade;
+    if (extra !== undefined) fields.permessi_extra = extra.join(',');
     if (p.nome_calendario !== undefined) fields.nome_calendario = Util.text(p.nome_calendario, 200);
     if (colore) fields.colore = colore;
     return Db.withLock(function () {
       var existing = Db.find('utenti', 'email', email);
       var out;
+      if (nuovaEmail) {
+        if (!existing || Util.bool(existing.eliminato)) throw new CtrlError('NOT_FOUND', 'Utente non trovato');
+        if (Db.find('utenti', 'email', nuovaEmail)) throw new CtrlError('CONFLICT', 'Questa email è già usata da un altro utente');
+        fields.email = nuovaEmail;
+      }
+      var tornato = !!(existing && Util.bool(existing.eliminato));   // email di un utente eliminato: lo si riattiva
       if (existing) {
         var before = JSON.parse(JSON.stringify(existing));
-        out = Db.update('utenti', 'email', email, fields, p.versione);
-        if (!out.colore && !fields.colore) { out = Db.update('utenti', 'email', email, { colore: scegliColore(email) }, null, true); }
-        var d = Storico.diff(before, out, ['nome', 'ruolo', 'attivo', 'scade_il', 'nome_calendario', 'colore']);
-        if (d.changed) Storico.log(actor.email, '', 'utenti', 'modifica', email, d.prima, d.dopo);
+        if (tornato) { fields.eliminato = ''; fields.eliminato_il = ''; if (extra === undefined) fields.permessi_extra = ''; }
+        out = Db.update('utenti', 'email', email, fields, tornato ? undefined : p.versione);
+        if (!out.colore && !fields.colore) { out = Db.update('utenti', 'email', out.email, { colore: scegliColore(out.email) }, null, true); }
+        var d = Storico.diff(before, out, ['nome', 'email', 'ruolo', 'attivo', 'scade_il', 'nome_calendario', 'colore', 'permessi_extra']);
+        if (d.changed) Storico.log(actor.email, '', 'utenti', 'modifica', out.email, d.prima, d.dopo);
         var lostAccess = before.attivo !== out.attivo && out.attivo === 'FALSE';
         var demoted = ruoloDi(before) !== ruoloDi(out);
-        if (lostAccess || demoted) Auth.revokeAll(email);
-        if (demoted) Accessi.log(email, 'ruolo', 'ok', '', etichettaRuolo(ruoloDi(before)) + ' → ' + etichettaRuolo(ruoloDi(out)), actor.email);
-        if ((before.scade_il || '') !== (out.scade_il || '')) {
-          Accessi.log(email, 'scadenza', 'ok', '', (before.scade_il || 'nessuna') + ' → ' + (out.scade_il || 'nessuna'), actor.email);
+        if (nuovaEmail) {
+          Db.all('assegnazioni').forEach(function (r) {
+            if (r.email === email) Db.update('assegnazioni', 'id', r.id, { email: nuovaEmail, aggiornata_il: Util.nowIso(), aggiornata_da: actor.email });
+          });
         }
-        if (lostAccess) Accessi.log(email, 'disattivato', 'ok', '', '', actor.email);
-        else if (before.attivo === 'FALSE' && out.attivo === 'TRUE') Accessi.log(email, 'riattivato', 'ok', '', '', actor.email);
+        if (lostAccess || demoted || nuovaEmail) Auth.revokeAll(email);
+        if (nuovaEmail) Accessi.log(nuovaEmail, 'email_cambiata', 'ok', '', email + ' → ' + nuovaEmail, actor.email);
+        if (tornato) Accessi.log(out.email, 'utente_creato', 'ok', '', etichettaRuolo(ruolo) + (out.scade_il ? ' · fino al ' + out.scade_il : '') + ' · già presente, riattivato', actor.email);
+        if (demoted) Accessi.log(out.email, 'ruolo', 'ok', '', etichettaRuolo(ruoloDi(before)) + ' → ' + etichettaRuolo(ruoloDi(out)), actor.email);
+        if ((before.scade_il || '') !== (out.scade_il || '')) {
+          Accessi.log(out.email, 'scadenza', 'ok', '', (before.scade_il || 'nessuna') + ' → ' + (out.scade_il || 'nessuna'), actor.email);
+        }
+        if ((before.permessi_extra || '') !== (out.permessi_extra || '') && !tornato) {
+          Accessi.log(out.email, 'permessi', 'ok', '', elencoExtra_(out.permessi_extra), actor.email);
+        }
+        if (lostAccess) Accessi.log(out.email, 'disattivato', 'ok', '', '', actor.email);
+        else if (before.attivo === 'FALSE' && out.attivo === 'TRUE' && !tornato) Accessi.log(out.email, 'riattivato', 'ok', '', '', actor.email);
       } else {
         fields.id = Util.newId('usr');
         if (!fields.colore) fields.colore = scegliColore('');
@@ -833,10 +903,39 @@ var Users = (function () {
         out = Db.insert('utenti', fields);
         Storico.log(actor.email, '', 'utenti', 'crea', email, '', { ruolo: ruolo });
         Accessi.log(email, 'utente_creato', 'ok', '', etichettaRuolo(ruolo) + (out.scade_il ? ' · fino al ' + out.scade_il : ''), actor.email);
+        if (out.permessi_extra) Accessi.log(email, 'permessi', 'ok', '', elencoExtra_(out.permessi_extra), actor.email);
       }
       // nome, alias o stato possono cambiare chi viene trovato nelle descrizioni
       Staff.ricalcolaSicuro_();
       return { email: out.email, versione: out.versione };
+    });
+  }
+
+  /**
+   * Elimina un utente senza cancellare la riga: non può più entrare, le sessioni si chiudono, sparisce dall'elenco
+   * e dagli eventi. Il registro accessi e lo storico restano. La stessa email si può registrare di nuovo.
+   */
+  function elimina(actor, p) {
+    require_(actor, 'impostazioni');
+    var email = Util.normEmail(p && p.email);
+    if (!Util.isEmail(email)) throw new CtrlError('INVALID', 'Email non valida');
+    if (email === adminEmail()) throw new CtrlError('INVALID', 'Il proprietario non si può eliminare');
+    return Db.withLock(function () {
+      var u = Db.find('utenti', 'email', email);
+      if (!u || Util.bool(u.eliminato)) throw new CtrlError('NOT_FOUND', 'Utente non trovato');
+      var ora = Util.nowIso();
+      Db.update('utenti', 'email', email, { eliminato: 'TRUE', eliminato_il: ora, attivo: 'FALSE', aggiornato_il: ora });
+      var sessioni = Auth.revokeAll(email);
+      var tolte = 0;
+      Db.all('assegnazioni').forEach(function (r) {
+        if (r.email !== email) return;
+        if (r.stato === 'confermata') { Db.update('assegnazioni', 'id', r.id, { stato: 'rimossa', aggiornata_il: ora, aggiornata_da: actor.email }); tolte++; }
+        else if (r.stato === 'proposta') Db.update('assegnazioni', 'id', r.id, { stato: 'decaduta', aggiornata_il: ora, aggiornata_da: actor.email });
+      });
+      Storico.log(actor.email, '', 'utenti', 'elimina', email, { ruolo: ruoloDi(u), nome: u.nome }, '');
+      Accessi.log(email, 'eliminato', 'ok', '', etichettaRuolo(ruoloDi(u)) + (tolte ? ' · tolto da ' + tolte + ' event' + (tolte === 1 ? 'o' : 'i') : ''), actor.email);
+      Staff.ricalcolaSicuro_();
+      return { email: email, sessioni_chiuse: sessioni || 0, assegnazioni_tolte: tolte };
     });
   }
 
@@ -865,7 +964,7 @@ var Users = (function () {
   return {
     proroga: proroga, scaduto: scaduto, etichettaRuolo: etichettaRuolo,
     byEmail: byEmail, ruoloDi: ruoloDi, perms: perms, can: can, require: require_, publicProfile: publicProfile,
-    touchLogin: touchLogin, list: list, save: save, adminEmail: adminEmail, coloreDi: coloreDi, scegliColore: scegliColore
+    touchLogin: touchLogin, nomeOwner: nomeOwner_, list: list, save: save, elimina: elimina, extraDi: extraDi, adminEmail: adminEmail, coloreDi: coloreDi, scegliColore: scegliColore
   };
 })();
 
@@ -947,7 +1046,8 @@ var Accessi = (function () {
     codice_errato: 'problemi', codici_esauriti: 'problemi', accesso_scaduto: 'problemi', accesso_negato: 'problemi',
     richiesta: 'richieste', richiesta_approvata: 'richieste', richiesta_rifiutata: 'richieste',
     utente_creato: 'amministrazione', ruolo: 'amministrazione', scadenza: 'amministrazione',
-    disattivato: 'amministrazione', riattivato: 'amministrazione', disconnessione: 'amministrazione'
+    disattivato: 'amministrazione', riattivato: 'amministrazione', disconnessione: 'amministrazione',
+    email_cambiata: 'amministrazione', permessi: 'amministrazione', eliminato: 'amministrazione'
   };
   var FILTRI = ['tutto', 'accessi', 'problemi', 'richieste', 'amministrazione'];
 
@@ -1035,7 +1135,7 @@ var Richieste = (function () {
     c.put('accreq_ora', String(n + 1), 3600);
 
     var nuova = Db.withLock(function () {
-      if (email === Users.adminEmail() || Db.find('utenti', 'email', email)) return false;
+      if (email === Users.adminEmail() || Users.byEmail(email)) return false;
       var blocco = Utilities.formatDate(new Date(Date.now() - BLOCCO_RIFIUTO_GIORNI * 86400000), CTRL_TZ, "yyyy-MM-dd'T'HH:mm:ss");
       var gia = Db.all('richieste_accesso').some(function (r) {
         return r.email === email && (r.stato === 'in_attesa' || (r.stato === 'rifiutata' && r.gestita_il > blocco));
@@ -1180,7 +1280,7 @@ var Staff = (function () {
   /** Utenti che possono essere assegnati: attivi e non scaduti. */
   function utentiAttivi() {
     return Db.all('utenti').filter(function (u) {
-      return (Util.bool(u.attivo) || Util.normEmail(u.email) === Users.adminEmail()) && !Users.scaduto(u);
+      return !Util.bool(u.eliminato) && (Util.bool(u.attivo) || Util.normEmail(u.email) === Users.adminEmail()) && !Users.scaduto(u);
     });
   }
 
@@ -1262,6 +1362,8 @@ var Staff = (function () {
    */
   function contesto(user) {
     if (!user || Users.can(user, 'admin')) return { tutto: true, consente: function () { return true; }, produzione: function () { return true; } };
+    // permesso particolare "vede tutti i documenti": accesso a ogni evento, ma non è l'Owner (niente proposte da confermare)
+    var tuttiDoc = Users.can(user, 'vedereTutto');
     var mie = {}, prod = {};
     var eventi = {};
     Db.all('eventi').forEach(function (e) { eventi[e.id] = e; });
@@ -1274,8 +1376,8 @@ var Staff = (function () {
     return {
       tutto: false,
       assegnato: function (eventoId) { return !!mie[eventoId]; },
-      consente: function (e) { return !!(e && (mie[e.id] || (e.progetto_id && prod[e.progetto_id]))); },
-      produzione: function (pid) { return !!prod[pid]; }
+      consente: function (e) { return !!(e && (tuttiDoc || mie[e.id] || (e.progetto_id && prod[e.progetto_id]))); },
+      produzione: function (pid) { return tuttiDoc || !!prod[pid]; }
     };
   }
 
@@ -1291,6 +1393,7 @@ var Staff = (function () {
 
   // ---------- vista per le liste di eventi ----------
   function nomeDi(u) {
+    if (Util.normEmail(u.email) === Users.adminEmail()) return Users.nomeOwner(u.nome);
     return String(u.nome || '').trim() || String(u.email || '').split('@')[0];
   }
 
@@ -2197,6 +2300,7 @@ var ACTIONS = {
 
   'utenti.list': { fn: function (u) { return Users.list(u); } },
   'utenti.save': { fn: function (u, p) { return Users.save(u, p); } },
+  'utenti.elimina': { fn: function (u, p) { return Users.elimina(u, p); } },
   'utenti.proroga': { fn: function (u, p) { return Users.proroga(u, p); } },
   'utenti.sessioni': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.sessionsOf(Util.normEmail(p.email)); } },
   'utenti.disconnetti': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.revoke(u, Util.normEmail(p.email), p.id); } },
@@ -2336,13 +2440,14 @@ function setup_(env) {
   Db.clearCache();
   if (!Db.find('utenti', 'email', props.ADMIN_EMAIL)) {
     Db.insert('utenti', {
-      id: Util.newId('usr'), email: props.ADMIN_EMAIL, nome: 'Admin', ruolo: 'OWNER', puo_caricare: 'TRUE',
+      id: Util.newId('usr'), email: props.ADMIN_EMAIL, nome: Users.nomeOwner(''), ruolo: 'OWNER', puo_caricare: 'TRUE',
       puo_modificare: 'TRUE', attivo: 'TRUE', creato_il: Util.nowIso(), aggiornato_il: Util.nowIso(), versione: '1'
     });
     log.push('Creato proprietario ' + props.ADMIN_EMAIL);
   }
   migraRuoli_(log);
   migraColori_(log);
+  migraNomeOwner_(log);
   if (!Settings.getRaw('schema_versione')) Settings.setRaw('schema_versione', String(SCHEMA_VERSION));
 
   installTriggers_();
@@ -2427,3 +2532,14 @@ var Backup = (function () {
   }
   return { run: run };
 })();
+
+/** Il proprietario si chiama col suo nome (non "Admin" o "Owner"): lo vedono anche gli altri tecnici. Idempotente. */
+function migraNomeOwner_(log) {
+  Db.clearCache();
+  var u = Db.find('utenti', 'email', Util.normEmail(Users.adminEmail()));
+  if (!u) return;
+  var nome = Users.nomeOwner(u.nome);
+  if (nome === String(u.nome || '').trim()) return;
+  Db.update('utenti', 'email', u.email, { nome: nome, aggiornato_il: Util.nowIso() }, null, true);
+  log.push('Nome del proprietario: ' + nome);
+}

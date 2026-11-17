@@ -30,6 +30,7 @@ function crea(r, modifica) {
     const g = creaGriglia({
       etichetta: s.nome || 'Location', righe: s.righe, nuovaRiga: nuovaVoce, autoCresci: true, minimoRighe: 5, solaLettura: !modifica,
       vuota: voceVuota, maxRighe: 500,
+      riassunto: (x) => ({ testa: x.qta ? x.qta + '×' : '', titolo: x.voce || '—', sotto: x.note || '' }),
       colonne: [
         { chiave: 'voce', titolo: 'Item', classe: 'c-voce', opzioni: (riga) => {
           const qui = unici(tutte().filter(x => x !== riga).map(x => x.voce)).map(v => ({ valore: v }));

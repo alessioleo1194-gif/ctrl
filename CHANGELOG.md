@@ -1,5 +1,21 @@
 # Registro delle modifiche
 
+## 0.10.0 · Gestione utenti completa e telefono (17/11/2026)
+
+- **Utenti**: campo unico "Nome e cognome"; **email modificabile** (stessa riga, stesso colore e assegnazioni, sessioni chiuse, nuovo codice al prossimo accesso;
+  rifiutata se già in uso); stato **Attivo / Sospeso**; **Elimina utente** con doppia conferma (nessuna cancellazione fisica: `eliminato`, sessioni chiuse,
+  assegnazioni confermate rimosse, proposte decadute; la stessa email può chiedere di nuovo l'accesso). Il proprietario è protetto e si chiama **"Alessio Leo"**
+  (non "Admin"). Le modifiche valgono subito anche per chi è già dentro.
+- **Permessi particolari** (spenti di default, per singolo utente): vede i documenti di tutti gli eventi, può caricare file, può modificare Plan e Material List.
+- **Registro accessi**: nuovi eventi `email_cambiata`, `permessi`, `eliminato`.
+- **Telefono**: Production Plan e Material List mostrano un **elenco di righe** con editor a schermo intero (un campo per colonna, Prec./Avanti, + Riga sotto,
+  Elimina con conferma). Il documento non cambia. Sotto i 700 px tocchi da 44 px e campi da 16 px (niente zoom di iOS). Viewer: sola lettura.
+  Su tablet e desktop resta il foglio a celle.
+- **Correzione**: l'aggiornamento tecnico dell'ultimo accesso poteva dare un falso CONFLICT sulla riga utente; ora non cambia la versione (test dedicato).
+- Backend: schema 7 (`utenti.permessi_extra`, `eliminato`, `eliminato_il`); azione nuova `utenti.elimina`.
+  **Dopo aver aggiornato Apps Script rilancia `setupProduzione` / `setupTest`** (aggiunge le colonne e rinomina l'Owner in "Alessio Leo").
+- Test: 84 backend, 7 unit, e2e desktop e telefono.
+
 ## 0.9.0 · Staff negli eventi (17/11/2026) · Fase 3 di 4
 
 - **Assegnazione dello staff** (solo Owner): scheda "Staff" nel dettaglio evento con assegnati, proposte e aggiunta manuale.

@@ -1,4 +1,5 @@
 import { leggiTsv, scriviTsv } from './tsv.js';
+import { creaRigheMobile, schermoStretto } from './righe-mobile.js';
 
 /**
  * Griglia stile foglio di calcolo: ogni cella è un campo di testo, si scrive direttamente.
@@ -11,7 +12,13 @@ import { leggiTsv, scriviTsv } from './tsv.js';
  */
 const MAX_STORIA = 100;
 
+/** Sul telefono (schermo stretto) l'elenco di righe con editor, altrimenti la griglia a colonne. */
 export function creaGriglia(opz) {
+  if (!opz.forzaTabella && schermoStretto()) return creaRigheMobile(opz);
+  return creaTabella(opz);
+}
+
+function creaTabella(opz) {
   const colonne = opz.colonne;
   const righe = opz.righe;
   const sola = !!opz.solaLettura;

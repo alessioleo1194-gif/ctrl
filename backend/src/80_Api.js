@@ -36,6 +36,7 @@ var ACTIONS = {
 
   'utenti.list': { fn: function (u) { return Users.list(u); } },
   'utenti.save': { fn: function (u, p) { return Users.save(u, p); } },
+  'utenti.elimina': { fn: function (u, p) { return Users.elimina(u, p); } },
   'utenti.proroga': { fn: function (u, p) { return Users.proroga(u, p); } },
   'utenti.sessioni': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.sessionsOf(Util.normEmail(p.email)); } },
   'utenti.disconnetti': { fn: function (u, p) { Users.require(u, 'impostazioni'); return Auth.revoke(u, Util.normEmail(p.email), p.id); } },

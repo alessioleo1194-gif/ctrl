@@ -16,7 +16,8 @@ var Accessi = (function () {
     codice_errato: 'problemi', codici_esauriti: 'problemi', accesso_scaduto: 'problemi', accesso_negato: 'problemi',
     richiesta: 'richieste', richiesta_approvata: 'richieste', richiesta_rifiutata: 'richieste',
     utente_creato: 'amministrazione', ruolo: 'amministrazione', scadenza: 'amministrazione',
-    disattivato: 'amministrazione', riattivato: 'amministrazione', disconnessione: 'amministrazione'
+    disattivato: 'amministrazione', riattivato: 'amministrazione', disconnessione: 'amministrazione',
+    email_cambiata: 'amministrazione', permessi: 'amministrazione', eliminato: 'amministrazione'
   };
   var FILTRI = ['tutto', 'accessi', 'problemi', 'richieste', 'amministrazione'];
 

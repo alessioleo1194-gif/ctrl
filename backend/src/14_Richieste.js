@@ -27,7 +27,7 @@ var Richieste = (function () {
     c.put('accreq_ora', String(n + 1), 3600);
 
     var nuova = Db.withLock(function () {
-      if (email === Users.adminEmail() || Db.find('utenti', 'email', email)) return false;
+      if (email === Users.adminEmail() || Users.byEmail(email)) return false;
       var blocco = Utilities.formatDate(new Date(Date.now() - BLOCCO_RIFIUTO_GIORNI * 86400000), CTRL_TZ, "yyyy-MM-dd'T'HH:mm:ss");
       var gia = Db.all('richieste_accesso').some(function (r) {
         return r.email === email && (r.stato === 'in_attesa' || (r.stato === 'rifiutata' && r.gestita_il > blocco));

@@ -50,6 +50,7 @@ function crea(r, modifica) {
   const crewGriglia = creaGriglia({
     etichetta: 'Crew', righe: crewRighe, nuovaRiga: nuovaCrew, autoCresci: true, minimoRighe: 8, solaLettura: !modifica, maxRighe: 100,
     vuota: (x) => !x.nome && !x.ruolo && !x.telefono && !x.email,
+    riassunto: (x) => ({ testa: '', titolo: x.nome || '—', sotto: [x.ruolo, x.telefono].filter(Boolean).join(' · ') }),
     colonne: [
       { chiave: 'nome', titolo: 'Name', opzioni: () => {
         const usati = new Set(crewRighe.map(x => x.nome.toLowerCase()));
@@ -71,6 +72,9 @@ function crea(r, modifica) {
     programma = creaGriglia({
       etichetta: 'Schedule', righe: g.righe, nuovaRiga: () => vuotaRiga(), solaLettura: !modifica, maxRighe: 400,
       vuota: (x) => !x.sez && !x.ora && !x.att && !x.loc && !x.note,
+      // telefono: si vedono solo le righe compilate (le 49 righe di base con la sola ora restano nascoste)
+      visibileMobile: (x) => rigaUsata(x) || (!!x.ora && !/^r\d{4}$/.test(x.id)),   // anche una riga appena aggiunta con la sola ora
+      riassunto: (x, i) => ({ testa: x.ora, titolo: x.att || '(senza attività)', sotto: [sezioniEffettive(g.righe)[i], x.loc, x.note].filter(Boolean).join(' · ') }),
       colonne: [
         { chiave: 'sez', titolo: 'Section', classe: 'c-sez',
           opzioni: (riga) => unici(['Pre Show', 'Show', ...tutteRighe().filter(x => x !== riga).map(x => x.sez)]),

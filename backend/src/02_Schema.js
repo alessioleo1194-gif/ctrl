@@ -6,7 +6,7 @@
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 6;
+var SCHEMA_VERSION = 7;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -42,7 +42,9 @@ var SCHEMA = {
   // nome_calendario: come la persona compare nelle descrizioni del Calendar (alias separati da virgola)
   // colore: uno di COLORI_UTENTE, uguale per la stessa persona ovunque nell'interfaccia
   utenti: ['id', 'email', 'nome', 'ruolo', 'puo_caricare', 'puo_modificare', 'attivo', 'creato_il',
-    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il', 'nome_calendario', 'colore'],
+    'aggiornato_il', 'versione', 'ultimo_accesso', 'scade_il', 'nome_calendario', 'colore',
+    // permessi_extra: eccezioni al ruolo, separate da virgola (tutti_documenti, carica, modifica). eliminato: TRUE = utente tolto (riga conservata).
+    'permessi_extra', 'eliminato', 'eliminato_il'],
   // staff assegnato agli eventi. stato: proposta (da confermare), confermata, scartata, rimossa, decaduta.
   // origine: calendario (trovato nella descrizione) o manuale. trovato/termine: dove e cosa è stato trovato.
   assegnazioni: ['id', 'evento_id', 'email', 'stato', 'origine', 'trovato', 'termine', 'creata_il', 'creata_da',

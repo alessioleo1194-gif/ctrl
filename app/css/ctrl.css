@@ -518,3 +518,45 @@ dialog.sheet .actions { display: flex; gap: 10px; justify-content: flex-end; fle
 .dotc { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--pd, var(--faint)); margin-right: 7px; vertical-align: baseline; }
 .pcn { display: flex; align-items: center; min-width: 0; }
 .pcn .dotc { flex: none; }
+
+/* scheda utente: stato, permessi particolari, elimina */
+.perm { border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; margin: 0; display: grid; gap: 2px; min-width: 0; }
+.perm legend { font: 700 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--mute); padding: 0 6px; }
+.seg.stato { display: flex; width: 100%; }
+.seg.stato button { flex: 1; min-height: 44px; }
+.elimina { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- telefono: elenco di righe al posto della griglia ---------- */
+.righe-m { display: grid; gap: 0; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); overflow: hidden; }
+.rm-riga { display: grid; grid-template-columns: minmax(44px, auto) minmax(0, 1fr); gap: 10px; align-items: center; text-align: left;
+  min-height: 56px; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); font: inherit; cursor: pointer; width: 100%; }
+.rm-riga:last-of-type { border-bottom: 1px solid var(--line); }
+.rm-riga.sola { cursor: default; }
+.rm-riga:active { background: var(--surface-2); }
+.rm-t { font: 700 13px/1.2 var(--mono); color: var(--accent); min-width: 44px; }
+.rm-t:empty { display: none; }
+.rm-riga:has(.rm-t:empty) { grid-template-columns: minmax(0, 1fr); }
+.rm-c { display: grid; gap: 2px; min-width: 0; }
+.rm-c b { font-weight: 600; overflow-wrap: anywhere; }
+.rm-c small { color: var(--mute); font-size: 13px; overflow-wrap: anywhere; }
+.rm-vuoto { padding: 16px 12px; color: var(--mute); font-size: 14px; border-bottom: 1px solid var(--line); }
+.rm-aggiungi { min-height: 52px; border: 0; background: var(--surface-2); color: var(--accent); font: 600 15px/1 var(--font); cursor: pointer; width: 100%; }
+.rm-aggiungi[disabled] { opacity: .5; }
+.rm-editor { gap: 12px; }
+.rm-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rm-nav .btn { min-height: 48px; }
+
+/* ---------- telefono: tocchi da 44 px, campi a 16 px (Safari non ingrandisce la pagina), testi minimi 12 px ---------- */
+@media (max-width: 700px) {
+  input, select, textarea, .input, select.input, textarea.input, .sez-nome { font-size: 16px; }
+  .btn, .btn.sm, .filters button, .chip-t, .seg button, .alt button, .iconbtn { min-height: 44px; }
+  .iconbtn { min-width: 44px; }
+  .brand { min-height: 44px; }
+  .alt button { padding: 0 12px; }
+  .swatches button { width: 44px; height: 44px; }
+  .griglia .az button, .griglia .riga-n { min-width: 44px; min-height: 44px; }
+  .label, .tag, .env-badge, .ev .day small, .perm legend, .logtbl th, .giorni .seg-b .n { font-size: 12px; }
+  .link-luogo, .detail-meta a { display: inline-block; padding: 12px 0; }
+  .search input, .sez-nome, .sez-nome.nuova { font-size: 16px; min-height: 44px; }
+  .foglio-nav .tab, .foglio-nav .btn { min-height: 44px; }
+}

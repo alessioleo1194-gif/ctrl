@@ -142,7 +142,7 @@ test('impostazioni: utenti, liste a tendina, sincronizzazione', async ({ page },
   await page.getByRole('button', { name: 'Aggiungi utente' }).click();
   const dlg = page.locator('dialog.sheet');
   await dlg.getByLabel('Email').fill('manuel@example.com');
-  await dlg.getByLabel('Nome', { exact: true }).fill('Manuel');
+  await dlg.getByLabel('Nome e cognome').fill('Manuel');
   await expect(dlg.getByLabel('Ruolo').locator('option')).toHaveText(['Production · lavora su Plan e Material List', 'Viewer · sola lettura']);
   await dlg.getByLabel('Ruolo').selectOption('PRODUCTION');
   await dlg.getByRole('button', { name: 'Salva' }).click();
@@ -275,12 +275,15 @@ const apriPlan = async (page, env, titolo = 'Cantelmo: Maria Mazzotta') => {
   await openEvent(page, env, titolo);
   await page.getByRole('button', { name: /Production Plan/ }).click();
   await expect(page.getByRole('heading', { name: 'Production Plan' })).toBeVisible();
-  await expect(page.locator('.programma tbody tr')).toHaveCount(49);
+  // desktop: foglio a celle (49 righe pronte); telefono: elenco di righe con "+ Aggiungi riga"
+  if (page.viewportSize().width > 700) await expect(page.locator('.programma tbody tr')).toHaveCount(49);
+  else await expect(page.getByRole('button', { name: /Aggiungi riga/ }).first()).toBeVisible();
 };
 
 const FRISELL = '16:45-18:30\tSoundcheck\tMain Stage\tBill Frisell Trio\n19:30\tDoors Open\tEntrance\t\n21:00\tShow Start\tMain Stage\t90 min\n22:30\tShow End\t\t';
 
 test('Production Plan: si apre subito come foglio pronto, senza modali né pulsanti "aggiungi"', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriPlan(page, env);
   await expect(page.locator('dialog[open]')).toHaveCount(0);
@@ -299,7 +302,8 @@ test('Production Plan: si apre subito come foglio pronto, senza modali né pulsa
   expect(righeDoc(env, 'plan')).toBe(null);   // niente viene salvato finché non scrivi
 });
 
-test('Production Plan: compilo solo con la tastiera (menu attività, Tab, Invio), si salva da solo e resta dopo il ricaricamento', async ({ page }) => {
+test('Production Plan: compilo solo con la tastiera (menu attività, Tab, Invio), si salva da solo e resta dopo il ricaricamento', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriPlan(page, env);
   await cella(page, 'Crew', 'Name', 1).click();
@@ -331,6 +335,7 @@ test('Production Plan: compilo solo con la tastiera (menu attività, Tab, Invio)
 });
 
 test('Production Plan: incollo un blocco da Excel in un colpo; Show Start porta in Show; documento ordinato per orario', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriPlan(page, env);
   await incolla(page, 'Schedule · Time · riga 5', '10:00\tLoad-out\tBack\tfinale\n');   // riga scritta in alto con un orario più tardi: il documento la riordina
@@ -376,7 +381,8 @@ test('Production Plan: incollo un blocco da Excel in un colpo; Show Start porta 
   expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('Soundcheck');
 });
 
-test('Production Plan: ordina per orario, inserisci e togli righe, annulla, copia di più celle', async ({ page }) => {
+test('Production Plan: ordina per orario, inserisci e togli righe, annulla, copia di più celle', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriPlan(page, env);
   await cella(page, 'Schedule', 'Activity', 17).fill('Setup');
@@ -414,7 +420,8 @@ test('Production Plan: ordina per orario, inserisci e togli righe, annulla, copi
   expect(await cella(page, 'Schedule', 'Time', 3).inputValue()).toBe('01:00');
 });
 
-test('Production Plan: più giornate, una scheda per tutto il festival, due eventi condividono lo stesso foglio', async ({ page }) => {
+test('Production Plan: più giornate, una scheda per tutto il festival, due eventi condividono lo stesso foglio', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await openEvent(page, env, 'Convegno Museo Castromediano');
   await page.getByRole('button', { name: /Production Plan/ }).click();
@@ -440,7 +447,8 @@ test('Production Plan: più giornate, una scheda per tutto il festival, due even
   expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('Registrazione');
 });
 
-test('Production Plan: la crew suggerisce persone già usate in altre produzioni e compila ruolo e contatti', async ({ page }) => {
+test('Production Plan: la crew suggerisce persone già usate in altre produzioni e compila ruolo e contatti', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   const adm = tokenFor(env, ADMIN);
   const lista = apiCall(env, adm, 'eventi.list', {}).data;
@@ -461,7 +469,8 @@ test('Production Plan: la crew suggerisce persone già usate in altre produzioni
   expect(await cella(page, 'Crew', 'Email', 11).inputValue()).toBe('t9@x.it');
 });
 
-test('salvataggio: un altro utente salva nel frattempo, le due modifiche si uniscono senza perdere nulla', async ({ page }) => {
+test('salvataggio: un altro utente salva nel frattempo, le due modifiche si uniscono senza perdere nulla', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriPlan(page, env);
   await cella(page, 'Schedule', 'Activity', 17).fill('Mia attività');
@@ -481,7 +490,8 @@ test('salvataggio: un altro utente salva nel frattempo, le due modifiche si unis
   expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('Mia attività');
 });
 
-test('rete che cade durante il salvataggio: riprova da solo, nessun dato perso né duplicato', async ({ page }) => {
+test('rete che cade durante il salvataggio: riprova da solo, nessun dato perso né duplicato', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriPlan(page, env);
   env.failSalva = 2;
@@ -493,7 +503,8 @@ test('rete che cade durante il salvataggio: riprova da solo, nessun dato perso n
   expect(env.getSS(env.state.props.DB_ID).getSheetByName('documenti').rows().length).toBe(2);   // intestazione + un solo documento
 });
 
-test('sola lettura: vede i fogli e genera il documento, ma non può scrivere né salvare', async ({ page }) => {
+test('sola lettura: vede i fogli e genera il documento, ma non può scrivere né salvare', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   const adm = tokenFor(env, ADMIN);
   const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo === 'Cantelmo: Maria Mazzotta').id;
@@ -523,6 +534,7 @@ const apriMateriali = async (page, env, titolo = 'Cantelmo: Maria Mazzotta') => 
 };
 
 test('Material List: foglio già pronto, scrivo location e voci, incollo da Excel, duplico, documento e PDF', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriMateriali(page, env);
   await expect(page.locator('dialog[open]')).toHaveCount(0);
@@ -581,7 +593,8 @@ test('Material List: foglio già pronto, scrivo location e voci, incollo da Exce
   await expect(page.locator('#toast')).toHaveText(/Testo copiato|Copia non riuscita/);
 });
 
-test('Material List: la libreria suggerisce materiali già usati in altri eventi e compila note; elimina location con conferma', async ({ page }) => {
+test('Material List: la libreria suggerisce materiali già usati in altri eventi e compila note; elimina location con conferma', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   const adm = tokenFor(env, ADMIN);
   const lista = apiCall(env, adm, 'eventi.list', {}).data;
@@ -628,6 +641,7 @@ test('tablet: i fogli stanno nello schermo in verticale e in orizzontale, azioni
 });
 
 test('Save Changes: salva il documento e archivia il PDF come file dell\'evento; l\'icona dell\'elenco si accende; salvare di nuovo sostituisce il PDF', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriMateriali(page, env);
   await page.getByLabel('Location · Item · riga 1').click();
@@ -662,7 +676,8 @@ test('Save Changes: salva il documento e archivia il PDF come file dell\'evento;
   expect([...env.state.drive.files.values()].filter(f => f.name === mat[0].nome && f.trashed)).toHaveLength(1);
 });
 
-test('Save Changes: se il PDF non si crea il documento resta salvato e lo dice', async ({ page }) => {
+test('Save Changes: se il PDF non si crea il documento resta salvato e lo dice', async ({ page }, info) => {
+  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
   const env = await setup(page);
   await apriMateriali(page, env);
   await page.getByLabel('Location · Item · riga 1').click();
@@ -889,7 +904,7 @@ test('staff: alias e colore dell\'utente nelle Impostazioni, anche per le propos
   await page.getByRole('button', { name: 'Aggiungi utente' }).click();
   const dlg = page.locator('dialog.sheet');
   await dlg.getByLabel('Email').fill('sara@example.com');
-  await dlg.getByLabel('Nome', { exact: true }).fill('Alessandra Rossi');
+  await dlg.getByLabel('Nome e cognome').fill('Alessandra Rossi');
   await dlg.getByLabel('Nome in calendario').fill('Sara, Sary');
   await dlg.getByRole('button', { name: 'Rosa' }).click();
   await dlg.getByRole('button', { name: 'Salva' }).click();
@@ -908,4 +923,302 @@ test('staff: alias e colore dell\'utente nelle Impostazioni, anche per le propos
   await expect(page.locator('#staff .staff-prop')).toContainText('Alessandra Rossi');
   await expect(page.locator('#staff .staff-prop mark')).toHaveText('Sara');
   await noHorizontalScroll(page);
+});
+
+// ---------------- gestione utenti completa ----------------
+
+test('utenti: nome e cognome, cambio email, sospendi, permessi particolari, elimina con conferma; il proprietario si chiama Alessio Leo', async ({ page }, info) => {
+  const env = await setup(page);
+  await login(page, env);
+  await page.getByRole('link', { name: 'Impostazioni' }).click();
+  const owner = page.locator('.urow', { hasText: ADMIN });
+  await expect(owner.getByText('Alessio Leo')).toBeVisible();
+  await expect(page.locator('.urow').getByText(/^Admin$/)).toHaveCount(0);
+  // nuovo utente: subito autorizzato, nessun altro passaggio
+  await page.getByRole('button', { name: 'Aggiungi utente' }).click();
+  let dlg = page.locator('dialog.sheet');
+  await dlg.getByLabel('Nome e cognome').fill('Marco Rossi');
+  await dlg.getByLabel('Email').fill('marco@example.com');
+  await dlg.getByLabel('Ruolo').selectOption('VIEWER');
+  await expect(dlg.getByText('Permessi particolari')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Salva' }).click();
+  let riga = page.locator('.urow', { hasText: 'marco@example.com' });
+  await expect(riga.getByText('Marco Rossi')).toBeVisible();
+  await expect(riga.locator('.tag', { hasText: 'Sospeso' })).toHaveCount(0);
+  const utentiDb = () => env.getSS(env.state.props.DB_ID).getSheetByName('utenti').rows();
+  let r = utentiDb().find(x => x[1] === 'marco@example.com');
+  expect(r[6]).toBe('TRUE');                                   // attivo
+  // il tecnico entra con il suo codice in un secondo contesto
+  const tecnico = await page.context().browser().newContext();
+  const p2 = await tecnico.newPage();
+  await setupSecondo(p2, env);
+  await login(p2, env, 'marco@example.com');
+  await expect(p2.getByRole('link', { name: 'Impostazioni' })).toHaveCount(0);
+  // modifica: email nuova, sospeso, permesso "Può caricare file"
+  await riga.getByRole('button', { name: 'Modifica' }).click();
+  dlg = page.locator('dialog.sheet');
+  await expect(dlg.getByLabel('Email')).toBeEnabled();
+  await expect(dlg.getByText(/Cambiando l'email/)).toBeHidden();
+  await dlg.getByLabel('Email').fill('marco.rossi@example.com');
+  await expect(dlg.getByText(/Cambiando l'email/)).toBeVisible();
+  await dlg.getByRole('button', { name: 'Sospeso' }).click();
+  await dlg.getByLabel('Può caricare file').check();
+  if (info.project.name === 'mobile') await page.screenshot({ path: `test-results/utente-form-${info.project.name}.png`, fullPage: false });
+  await dlg.getByRole('button', { name: 'Salva' }).click();
+  riga = page.locator('.urow', { hasText: 'marco.rossi@example.com' });
+  await expect(riga.locator('.tag', { hasText: 'Sospeso' })).toBeVisible();
+  await expect(riga.locator('.tag', { hasText: 'Permessi particolari' })).toBeVisible();
+  await expect(page.locator('.urow', { hasText: /marco@example\.com/ })).toHaveCount(0);
+  expect(utentiDb().filter(x => x[2] === 'Marco Rossi').length).toBe(1);   // lo stesso profilo, non un doppione
+  // il tecnico già dentro viene buttato fuori subito (email cambiata + sospeso)
+  await p2.reload();
+  await expect(p2.getByLabel('Email')).toBeVisible();
+  await tecnico.close();
+  // riattivo e elimino: due tocchi, il secondo conferma
+  await riga.getByRole('button', { name: 'Modifica' }).click();
+  dlg = page.locator('dialog.sheet');
+  await dlg.getByRole('button', { name: 'Attivo', exact: true }).click();
+  await dlg.getByRole('button', { name: 'Salva' }).click();
+  await expect(riga.locator('.tag', { hasText: 'Sospeso' })).toHaveCount(0);
+  await riga.getByRole('button', { name: 'Modifica' }).click();
+  dlg = page.locator('dialog.sheet');
+  await dlg.getByRole('button', { name: 'Elimina utente' }).click();
+  await expect(dlg.getByRole('button', { name: 'Conferma: elimina Marco Rossi' })).toBeVisible();
+  await dlg.getByRole('button', { name: 'Annulla', exact: true }).first().click();       // ripensamento: non cancella
+  await expect(dlg.getByRole('button', { name: 'Elimina utente' })).toBeVisible();
+  await dlg.getByRole('button', { name: 'Elimina utente' }).click();
+  await dlg.getByRole('button', { name: 'Conferma: elimina Marco Rossi' }).click();
+  await expect(page.getByText('Marco Rossi eliminato')).toBeVisible();
+  await expect(page.locator('.urow', { hasText: 'marco.rossi@example.com' })).toHaveCount(0);
+  r = utentiDb().find(x => x[1] === 'marco.rossi@example.com');
+  expect(r, 'la riga resta nel foglio').toBeTruthy();
+  // il proprietario non si può eliminare né modificare
+  await expect(owner.getByRole('button', { name: 'Modifica' })).toBeDisabled();
+  await noHorizontalScroll(page);
+});
+
+async function setupSecondo(page, env) {
+  await page.route(/script\.google(usercontent)?\.com/, (r) => r.abort());
+  await page.addInitScript((url) => { window.__CTRL_API__ = url; }, API);
+  await page.route(API, async (route) => {
+    const out = JSON.parse(JSON.stringify(env.ctx.handleRequest(route.request().postData())));
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
+  });
+}
+
+test('sessione persistente: dopo il ricaricamento e dopo aver chiuso e riaperto la scheda si resta dentro; esci chiude la sessione', async ({ page }) => {
+  const env = await setup(page);
+  await login(page, env);
+  await page.reload();
+  await expect(page.locator('.ev').first()).toBeVisible();                       // niente nuovo login
+  const ctx = page.context();
+  const nuova = await ctx.newPage();                                              // "riapro il browser": nuova scheda, stesso profilo
+  await setupSecondo(nuova, env);
+  await nuova.goto('/');
+  await expect(nuova.locator('.ev').first()).toBeVisible();
+  await nuova.close();
+  await page.getByRole('button', { name: 'Esci' }).click();
+  await expect(page.getByLabel('Email')).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Email')).toBeVisible();                          // dopo il ricaricamento non si rientra
+  expect(env.getSS(env.state.props.DB_ID).getSheetByName('sessioni').rows().slice(1).filter(x => x[1] === ADMIN).length).toBe(0);
+});
+
+// ---------------- telefono: elenco di righe, editor, misure ----------------
+
+const soloTelefono = (info) => test.skip(info.project.name !== 'mobile', 'prova pensata per lo schermo del telefono');
+
+test('telefono · Production Plan: elenco di righe e editor, compilo senza scorrere di lato, si salva, documento e PDF', async ({ page }, info) => {
+  soloTelefono(info);
+  const env = await setup(page);
+  await apriPlan2(page, env);
+  await expect(page.locator('.griglia')).toHaveCount(0);                                  // niente griglia a colonne
+  const crew = page.locator('.righe-m').first();
+  const prog = page.locator('.righe-m').nth(1);
+  await expect(prog.locator('.rm-riga')).toHaveCount(0);                                  // le 49 righe di base restano nascoste
+  await expect(prog.getByText('Nessuna riga ancora.')).toBeVisible();
+  // prima riga: Time scritto "1930" diventa 19:30
+  await prog.getByRole('button', { name: /Aggiungi riga/ }).click();
+  const dlg = page.locator('dialog.sheet');
+  await expect(dlg.getByRole('heading', { name: /Schedule · Nuova riga|Schedule · Riga 1 di 1/ })).toBeVisible();
+  for (const l of ['Time', 'Activity', 'Location', 'Section', 'Details / Notes']) await expect(dlg.getByLabel(l, { exact: true })).toBeVisible();
+  const fs = await dlg.getByLabel('Time', { exact: true }).evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+  expect(fs).toBeGreaterThanOrEqual(16);                                                  // Safari non ingrandisce
+  await dlg.getByLabel('Time', { exact: true }).fill('1930');
+  await dlg.getByLabel('Time', { exact: true }).blur();
+  await expect(dlg.getByLabel('Time', { exact: true })).toHaveValue('19:30');
+  await dlg.getByLabel('Activity', { exact: true }).fill('Doors Open');
+  await dlg.getByLabel('Location', { exact: true }).fill('Entrance');
+  // "Avanti" apre una riga nuova: soundcheck
+  await dlg.getByRole('button', { name: 'Avanti ›' }).click();
+  await dlg.getByLabel('Time', { exact: true }).fill('16:45-18:30');
+  await dlg.getByLabel('Time', { exact: true }).blur();
+  await expect(dlg.getByLabel('Time', { exact: true })).toHaveValue('16:45 – 18:30');
+  await dlg.getByLabel('Activity', { exact: true }).fill('Soundcheck');
+  await dlg.getByLabel('Location', { exact: true }).fill('Main Stage');
+  await dlg.getByLabel('Details / Notes', { exact: true }).fill('Bill Frisell Trio');
+  await page.screenshot({ path: `test-results/mobile-plan-editor.png` });
+  await dlg.getByRole('button', { name: 'Fatto' }).click();
+  await expect(prog.locator('.rm-riga')).toHaveCount(2);
+  await expect(prog.locator('.rm-riga').nth(1)).toContainText('Soundcheck');
+  await expect(prog.locator('.rm-riga').nth(1)).toContainText('16:45 – 18:30');
+  await expect(prog.locator('.rm-riga').nth(1)).toContainText('Main Stage · Bill Frisell Trio');
+  await noHorizontalScroll(page);
+  await page.screenshot({ path: `test-results/mobile-plan-elenco.png`, fullPage: true });
+  // salvataggio automatico: i dati sono davvero nel database
+  await salvato(page);
+  const plan = righeDoc(env, 'plan');
+  const att = plan.giorni.flatMap(g => g.righe).filter(r => r.att).map(r => [r.ora, r.att, r.loc]);
+  expect(att).toEqual(expect.arrayContaining([['19:30', 'Doors Open', 'Entrance'], ['16:45 – 18:30', 'Soundcheck', 'Main Stage']]));
+  // modifico una riga esistente toccandola, poi la elimino (due tocchi)
+  await prog.locator('.rm-riga').first().click();
+  await dlg.getByLabel('Activity', { exact: true }).fill('Doors');
+  await dlg.getByRole('button', { name: 'Fatto' }).click();
+  await expect(prog.locator('.rm-riga').first()).toContainText('Doors');
+  await prog.locator('.rm-riga').first().click();
+  await dlg.getByRole('button', { name: 'Elimina riga' }).click();
+  await expect(dlg.getByRole('button', { name: 'Conferma: elimina' })).toBeVisible();
+  await dlg.getByRole('button', { name: 'Conferma: elimina' }).click();
+  await expect(dlg).toBeHidden();
+  await expect(prog.locator('.rm-riga')).toHaveCount(1);
+  // crew: nome, ruolo e telefono
+  await crew.getByRole('button', { name: /Aggiungi riga/ }).click();
+  await dlg.getByLabel('Name', { exact: true }).fill('Mario Rossi');
+  await dlg.getByLabel('Role', { exact: true }).fill('FOH');
+  await dlg.getByLabel('Phone', { exact: true }).fill('393 000 0000');
+  await dlg.getByRole('button', { name: 'Fatto' }).click();
+  await expect(crew.locator('.rm-riga')).toContainText('Mario Rossi');
+  await expect(crew.locator('.rm-riga')).toContainText('FOH · 393 000 0000');
+  // documento e PDF dal telefono
+  await page.getByRole('button', { name: 'Generate PdP' }).click();
+  const doc = page.locator('article.doc');
+  await expect(doc).toContainText('Soundcheck');
+  await expect(doc).toContainText('Mario Rossi');
+  await noHorizontalScroll(page);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download PDF' }).click()]);
+  expect(dl.suggestedFilename()).toMatch(/^Production Plan - .*\.pdf$/);
+  const fs2 = await import('node:fs');
+  expect(fs2.readFileSync(await dl.path()).subarray(0, 5).toString()).toBe('%PDF-');
+});
+
+async function apriPlan2(page, env, titolo = 'Cantelmo: Maria Mazzotta') {
+  await openEvent(page, env, titolo);
+  await page.getByRole('button', { name: /Production Plan/ }).click();
+  await expect(page.getByRole('heading', { name: 'Production Plan' })).toBeVisible();
+  await expect(page.locator('.righe-m').first()).toBeVisible();
+}
+
+test('telefono · Material List: location, voci con quantità numerica, suggerimenti, duplica, elimina, documento', async ({ page }, info) => {
+  soloTelefono(info);
+  const env = await setup(page);
+  await apriMateriali(page, env);
+  await expect(page.locator('.griglia')).toHaveCount(0);
+  await page.getByLabel('Location name').first().fill('MAIN STAGE');
+  const lista = page.locator('.righe-m').first();
+  await lista.getByRole('button', { name: /Aggiungi riga/ }).click();
+  const dlg = page.locator('dialog.sheet');
+  expect(await dlg.getByLabel('Quantity', { exact: true }).getAttribute('inputmode')).toBe('decimal');   // tastiera numerica
+  await dlg.getByLabel('Item', { exact: true }).fill('Microphone Stands');
+  await dlg.getByLabel('Quantity', { exact: true }).fill('12');
+  await dlg.getByLabel('Notes', { exact: true }).fill('Boom');
+  await dlg.getByRole('button', { name: 'Avanti ›' }).click();
+  await dlg.getByLabel('Item', { exact: true }).fill('XLR Cables');
+  await dlg.getByLabel('Quantity', { exact: true }).fill('20');
+  await dlg.getByRole('button', { name: 'Fatto' }).click();
+  await expect(lista.locator('.rm-riga')).toHaveCount(2);
+  await expect(lista.locator('.rm-riga').first()).toContainText('12×');
+  await expect(lista.locator('.rm-riga').first()).toContainText('Microphone Stands');
+  await page.screenshot({ path: `test-results/mobile-material-elenco.png`, fullPage: true });
+  await salvato(page);
+  const mat = righeDoc(env, 'materiali');
+  expect(mat.sezioni[0].righe.filter(r => r.voce).map(r => [r.voce, r.qta])).toEqual([['Microphone Stands', '12'], ['XLR Cables', '20']]);
+  // nuova location scrivendo il nome, e duplicazione
+  await page.getByPlaceholder(/New location/).fill('BACKLINE');
+  await page.getByPlaceholder(/New location/).press('Enter');
+  await expect(page.locator('.sez')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Duplicate' }).first().click();
+  await expect(page.locator('.sez')).toHaveCount(4);
+  await expect(page.locator('.sez').nth(1).locator('.rm-riga')).toHaveCount(2);
+  await noHorizontalScroll(page);
+  // documento
+  await page.getByRole('button', { name: 'Generate list' }).click();
+  await expect(page.locator('article.doc')).toContainText('Microphone Stands');
+  await noHorizontalScroll(page);
+});
+
+test('telefono · sola lettura: Viewer assegnato vede le righe ma non può aggiungere né aprire l\'editor', async ({ page }, info) => {
+  soloTelefono(info);
+  const env = await setup(page);
+  const tok = tokenFor(env, ADMIN);
+  apiCall(env, tok, 'utenti.save', { email: 'viewer@example.com', nome: 'Viola Viewer', ruolo: 'VIEWER' });
+  const ev = apiCall(env, tok, 'eventi.list', {}).data.find(e => e.titolo.startsWith('Cantelmo'));
+  apiCall(env, tok, 'staff.gestisci', { evento_id: ev.id, azione: 'aggiungi', email: 'viewer@example.com' });
+  const pr = apiCall(env, tok, 'produzione.assicura', { evento_id: ev.id }).data;
+  const doc = apiCall(env, tok, 'documento.get', { produzione_id: pr.id, tipo: 'plan' }).data;
+  apiCall(env, tok, 'documento.salva', { produzione_id: pr.id, tipo: 'plan', versione: doc.versione, dati: { lingua: 'en', crew: [], giorni: [{ id: 'g1', data: ev.data, righe: [{ id: 'x1', sez: '', ora: '21:00', att: 'Show Start', loc: 'Main Stage', note: '' }] }] } });
+  await login(page, env, 'viewer@example.com');
+  await page.getByText('Cantelmo: Maria Mazzotta').click();
+  await page.getByRole('link', { name: /Production Plan/ }).click();
+  await expect(page.getByRole('heading', { name: 'Production Plan' })).toBeVisible();
+  const prog = page.locator('.righe-m.sola').nth(1);
+  await expect(prog.locator('.rm-riga')).toHaveCount(1);
+  await expect(prog.locator('.rm-riga')).toContainText('Show Start');
+  await expect(page.getByRole('button', { name: /Aggiungi riga/ })).toHaveCount(0);
+  await prog.locator('.rm-riga').click({ force: true });
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+});
+
+/** Misure da telefono: nessuno scroll di lato, tocchi da 44 px, campi a 16 px. Vale per ogni schermata principale. */
+async function misure(page, nome) {
+  const r = await page.evaluate(() => {
+    const vis = (el) => { const b = el.getBoundingClientRect(); const s = getComputedStyle(el); return b.width > 1 && b.height > 1 && s.visibility !== 'hidden' && s.display !== 'none'; };
+    const radice = document.querySelector('dialog[open]') || document;
+    const nomeEl = (el) => (el.getAttribute('aria-label') || el.innerText || el.name || el.tagName).trim().replace(/\s+/g, ' ').slice(0, 40);
+    const piccoli = [], font = [];
+    radice.querySelectorAll('button, a.btn, a.brand, a.tab, a.iconbtn, select, [role=tab], input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]), textarea').forEach((el) => {
+      if (!vis(el)) return;
+      const b = el.getBoundingClientRect();
+      if (Math.min(b.width, b.height) < 43.5) piccoli.push(nomeEl(el) + ' ' + Math.round(b.width) + 'x' + Math.round(b.height));
+      if (/INPUT|SELECT|TEXTAREA/.test(el.tagName) && parseFloat(getComputedStyle(el).fontSize) < 16) font.push(nomeEl(el));
+    });
+    return { piccoli, font, largo: document.documentElement.scrollWidth > window.innerWidth };
+  });
+  if (r.largo) problemiMisure.push(nome + ': scroll orizzontale');
+  r.piccoli.forEach(x => problemiMisure.push(nome + ': tocco piccolo · ' + x));
+  r.font.forEach(x => problemiMisure.push(nome + ': campo sotto i 16 px · ' + x));
+}
+const problemiMisure = [];
+
+test('telefono · misure: tocchi da 44 px e campi a 16 px nelle schermate principali, a 375 e a 412 px', async ({ page }, info) => {
+  soloTelefono(info);
+  const env = await setup(page);
+  for (const w of [375, 412]) {
+    await page.setViewportSize({ width: w, height: 800 });
+    await page.goto('/');
+    await page.getByLabel('Email').waitFor();
+    await misure(page, `login ${w}`);
+    await page.getByRole('button', { name: /Richiedilo/ }).click();
+    await misure(page, `richiesta ${w}`);
+    await login(page, env);
+    await misure(page, `elenco ${w}`);
+    await page.getByText('Cantelmo: Maria Mazzotta').click();
+    await expect(page.getByRole('heading', { name: 'Cantelmo: Maria Mazzotta' })).toBeVisible();
+    await misure(page, `evento ${w}`);
+    await page.getByRole('button', { name: /Production Plan/ }).or(page.getByRole('link', { name: /Production Plan/ })).first().click();
+    await expect(page.locator('.righe-m').first()).toBeVisible();
+    await misure(page, `plan ${w}`);
+    await page.getByRole('link', { name: 'Material List' }).click();
+    await expect(page.getByRole('heading', { name: 'Material List' })).toBeVisible();
+    await misure(page, `materiali ${w}`);
+    await page.goto('/#/impostazioni');
+    await expect(page.getByRole('heading', { name: 'Impostazioni' })).toBeVisible();
+    await misure(page, `impostazioni ${w}`);
+    await page.getByRole('button', { name: 'Aggiungi utente' }).click();
+    await misure(page, `utente ${w}`);
+    await page.keyboard.press('Escape');
+    await page.goto('/#/');
+    await page.getByRole('button', { name: 'Esci' }).click();
+    await page.getByLabel('Email').waitFor();
+  }
+  expect([...new Set(problemiMisure)]).toEqual([]);
 });
