@@ -42,16 +42,20 @@ Tabelle in `backend/src/02_Schema.js`. Eventi:
 - Eventi ricorrenti: ogni occorrenza è un evento distinto (`cal_key = id@data`).
 - Il colore è quello dell'evento sul Calendar; se l'evento non ne ha uno, quello del calendario.
 
-Scheda di produzione (`23_Produzioni.js`): una produzione (`progetti`) raggruppa uno o più eventi e contiene
-`giornate`, spazi (`location`), `squadra` (che punta alla rubrica comune `persone`) e il programma (`attivita`).
-L'app salva a lotti con `produzione.salva`: id generati dall'app, lotto validato tutto prima di scrivere,
-un "crea" ripetuto diventa una modifica. L'app ordina il lotto: prima giornate, spazi e persone create,
-per ultime giornate e spazi tolti.
+Documenti di produzione: una produzione (`progetti`, `23_Produzioni.js`) raggruppa uno o più eventi (un festival ne ha
+molti) e si crea da sola alla prima apertura (`produzione.assicura`). Ha due documenti, **Production Plan** (`plan`) e
+**Material List** (`materiali`), gestiti da `24_Documenti.js`: ogni documento è un JSON salvato per intero in `documenti`,
+spezzato in parti da 30.000 caratteri in `documenti_parti` (limite delle celle). Salvataggio ottimistico:
+`documento.salva` manda la versione letta; se è cambiata risponde `{conflitto: true, dati}` (un dato, non un errore) e
+l'app unisce le due versioni riga per riga e campo per campo (`app/js/unisci.js`) e rinvia. I dati in arrivo sono
+ripuliti e limitati nel backend. I suggerimenti (crew e materiali già usati in altre produzioni) arrivano con `documento.get`.
 
-Programma (Production Schedule): le regole (voci di attività, ordine sulla giornata operativa 06:00-05:59,
-sovrapposizioni, avvisi) stanno in `backend/src/24_Programma.js`; `npm run build` le copia in `app/js/programma.js`
-e `npm run check` verifica che le due copie coincidano. Il documento usa `app/js/documento-dati.js` sia per
-l'anteprima sul sito sia per il PDF (`app/js/pdf.js`, jsPDF in `app/vendor`, caricato solo quando serve).
+Interfaccia a foglio: `app/js/grid.js` è la griglia nativa (celle di testo, tastiera, selezione, copia/incolla TSV da/verso
+Excel con `tsv.js`, annulla/ripeti, elenchi filtrati); `views/plan.js` e `views/materiali.js` la usano dentro il guscio
+`views/foglio.js` (caricamento, salvataggio automatico `salvataggio.js`, passaggio al documento). Il documento finale
+(`views/doc.js`) usa `documento-dati.js` per anteprima, testo copiato e PDF (`pdf.js`, jsPDF in `app/vendor`, caricato solo quando serve).
+Nel Plan la colonna Section vale per tutte le righe sotto finché non ne scrivi un'altra (si parte da Pre Show);
+le righe restano dove le scrivi, "Sort by time" le ordina, il documento è sempre ordinato per orario.
 
 ## Attività automatiche (trigger Apps Script)
 

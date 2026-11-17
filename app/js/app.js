@@ -6,7 +6,8 @@ import { renderList } from './views/events.js';
 import { renderEvent } from './views/event.js';
 import { openEventForm } from './views/eventForm.js';
 import { renderSettings } from './views/settings.js';
-import { renderProduzione } from './views/produzione.js';
+import { renderPlan } from './views/plan.js';
+import { renderMateriali } from './views/materiali.js';
 
 export const store = {
   user: null,
@@ -95,11 +96,11 @@ async function route() {
     return renderSettings(main);
   }
 
-  const pm = hash.match(/^#\/p\/([\w-]+)(?:\/(\w+))?/);
+  const pm = hash.match(/^#\/p\/([\w-]+)(?:\/(plan|materiali))?\/?$/);
   if (pm) {
     const main = h('main');
     root.replaceChildren(bar, main);
-    return renderProduzione(main, pm[1], pm[2]);
+    return pm[2] === 'materiali' ? renderMateriali(main, pm[1]) : renderPlan(main, pm[1]);
   }
 
   const m = hash.match(/^#\/e\/([\w-]+)/);

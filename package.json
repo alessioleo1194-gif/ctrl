@@ -7,8 +7,9 @@
   "scripts": {
     "build": "node scripts/build-backend.mjs",
     "check": "node scripts/build-backend.mjs --check",
-    "test": "npm run test:backend && npm run test:e2e",
+    "test": "npm run test:backend && npm run test:unit && npm run test:e2e",
     "test:backend": "node --test tests/backend/*.test.mjs",
+    "test:unit": "node --test tests/unit/*.test.mjs",
     "test:e2e": "playwright test",
     "serve": "node scripts/serve.mjs"
   },

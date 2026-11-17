@@ -63,41 +63,67 @@ function draw(pane, ev) {
   pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, produzione, allegati, notes, admin, histo));
 }
 
-const STATO_TESTO = { vuoto: 'da compilare', in_corso: 'da completare', completo: 'completo' };
-
-/** Riquadro della scheda di produzione: riepilogo e accesso, oppure creazione. */
+/**
+ * Riquadro dei documenti operativi: Production Plan e Material List si aprono direttamente come fogli.
+ * La produzione (che raggruppa gli eventi di un festival) si crea da sola alla prima apertura.
+ */
 function produzioneCard(ev, p) {
   const pr = ev.produzione;
-  if (!pr) {
-    const status = h('div', { class: 'status-line' });
-    const crea = p.modificare ? h('button', { class: 'btn primary', onclick: async (e) => {
-      const b = e.currentTarget;
-      b.disabled = true; b.textContent = 'Creazione…';
+  const status = h('div', { class: 'status-line' });
+  const info = (tipo) => {
+    const d = pr && pr.documenti && pr.documenti[tipo];
+    return d ? 'Compilato · modificato ' + stamp(d.aggiornato_il) : 'Da compilare';
+  };
+  const apri = (tipo, nome, ico, cls) => {
+    const corpo = [h('span', { class: 'doc-ico ' + cls }, icon(ico)), h('span', { class: 'doc-btn-t' }, h('b', {}, nome), h('span', { class: 'help' }, info(tipo)))];
+    if (pr) return h('a', { class: 'doc-btn', href: '#/p/' + pr.id + '/' + tipo }, corpo);
+    if (!p.modificare) return h('span', { class: 'doc-btn off' }, corpo);
+    return h('button', { class: 'doc-btn', onclick: async (e) => {
+      const b = e.currentTarget; b.disabled = true;
       try {
-        const nuova = await api('produzione.crea', { evento_id: ev.id });
+        const nuova = await api('produzione.assicura', { evento_id: ev.id });
         const x = store.events?.find(y => y.id === ev.id); if (x) x.produzione_id = nuova.id;
-        navigate('#/p/' + nuova.id);
-      } catch (err) { status.className = 'status-line err'; status.textContent = err.message; b.disabled = false; b.textContent = 'Crea scheda di produzione'; }
-    } }, icon('plus'), 'Crea scheda di produzione') : null;
-    return h('section', { class: 'card prod-card' },
-      h('header', {}, h('span', { class: 'label' }, 'Scheda di produzione')),
-      h('div', { class: 'in', style: { display: 'grid', gap: '10px' } },
-        h('p', { class: 'help', style: { margin: 0 } }, p.modificare
-          ? 'Programma, giornate, spazi e squadra in un unico posto. Si parte dalle date e dal luogo di questo evento.'
-          : 'Nessuna scheda di produzione per questo evento.'),
-        crea ? h('div', { class: 'row' }, crea) : null, status));
-  }
-  const b = pr.blocchi;
-  const riga = (nome, testo, st) => h('div', { class: 'prod-sum-row' }, h('span', { class: 'dot ' + st, 'aria-hidden': 'true' }), h('b', {}, nome), h('span', { class: 'help' }, testo + ' · ' + STATO_TESTO[st]));
+        navigate('#/p/' + nuova.id + '/' + tipo);
+      } catch (err) { status.className = 'status-line err'; status.textContent = err.message; b.disabled = false; }
+    } }, corpo);
+  };
   return h('section', { class: 'card prod-card' },
-    h('header', {}, h('span', { class: 'label' }, pr.tipo === 'festival' ? 'Scheda di produzione · festival' : 'Scheda di produzione'),
-      h('a', { class: 'btn primary', href: '#/p/' + pr.id }, 'Apri scheda')),
-    h('div', { class: 'in', style: { display: 'grid', gap: '6px' } },
-      pr.tipo === 'festival' ? h('p', { style: { margin: '0 0 4px' } }, h('b', {}, pr.nome), h('span', { class: 'help' }, ` · ${pr.eventi} eventi`)) : null,
-      b.programma ? riga('Programma', `${b.programma.attivita} attività`, b.programma.stato) : null,
-      riga('Struttura', `${b.struttura.giornate} ${b.struttura.giornate === 1 ? 'giornata' : 'giornate'}, ${b.struttura.spazi} ${b.struttura.spazi === 1 ? 'spazio' : 'spazi'}`, b.struttura.stato),
-      riga('Persone', `${b.persone.squadra} in squadra`, b.persone.stato),
-      pr.avvisi ? h('a', { class: 'help', href: '#/p/' + pr.id }, pr.avvisi === 1 ? '1 avviso da controllare' : pr.avvisi + ' avvisi da controllare') : null));
+    h('header', {}, h('span', { class: 'label' }, pr && pr.tipo === 'festival' ? 'Documenti di produzione · festival' : 'Documenti di produzione')),
+    h('div', { class: 'in', style: { display: 'grid', gap: '10px' } },
+      h('div', { class: 'doc-btns' }, apri('plan', 'Production Plan', 'piano', 'piano'), apri('materiali', 'Material List', 'materiale', 'materiale')),
+      pr && pr.eventi.length > 1 ? h('p', { class: 'help', style: { margin: 0 } }, 'Condivisi con: ' + pr.eventi.filter(e => e.id !== ev.id).map(e => e.titolo).join(' · ')) : null,
+      pr && p.modificare ? festivalMenu(ev, pr) : null,
+      status));
+}
+
+/** Festival: più eventi del Calendar condividono lo stesso Production Plan e la stessa Material List. */
+function festivalMenu(ev, pr) {
+  const corpo = h('div', { class: 'festival-corpo' });
+  const det = h('details', { class: 'festival' }, h('summary', {}, 'Festival: condividi con altri eventi'), corpo);
+  det.addEventListener('toggle', () => { if (det.open) disegna(); });
+  async function agisci(fn) {
+    try {
+      const nuova = await fn();
+      if (store.events) store.events.forEach(y => {
+        if (nuova.eventi.some(z => z.id === y.id)) y.produzione_id = nuova.id; else if (y.produzione_id === nuova.id) y.produzione_id = '';
+      });
+      const pane = det.closest('.pane-detail');
+      if (pane) renderEvent(pane, ev.id);
+    } catch (e) { toast(e.message, 'err'); }
+  }
+  async function disegna() {
+    corpo.replaceChildren(loading('…'));
+    let eventi = store.events;
+    try { eventi = eventi || await api('eventi.list', {}); } catch (e) { corpo.replaceChildren(h('p', { class: 'help' }, e.message)); return; }
+    const liberi = eventi.filter(x => !x.produzione_id && x.id !== ev.id);
+    corpo.replaceChildren(
+      h('div', { class: 'ev-linked' }, pr.eventi.map(x => h('div', { class: 'ev-link' },
+        h('span', {}, h('b', {}, x.titolo), h('span', { class: 'help' }, ' · ' + x.data)),
+        pr.eventi.length > 1 ? h('button', { class: 'btn ghost', onclick: () => agisci(() => api('produzione.scollega', { id: pr.id, evento_id: x.id })) }, 'Scollega') : null))),
+      liberi.length ? h('select', { class: 'input', 'aria-label': 'Collega un altro evento', onchange: (e) => { if (e.target.value) agisci(() => api('produzione.collega', { id: pr.id, evento_id: e.target.value })); } },
+        h('option', { value: '' }, 'Collega un altro evento…'), liberi.slice(0, 200).map(x => h('option', { value: x.id }, x.data + ' · ' + x.titolo))) : h('p', { class: 'help' }, 'Nessun altro evento libero da collegare.'));
+  }
+  return det;
 }
 
 function notesCard(ev, p, redraw) {

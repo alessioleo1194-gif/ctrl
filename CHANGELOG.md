@@ -1,5 +1,24 @@
 # Registro delle modifiche
 
+## 0.5.0 · Production Plan e Material List come fogli di lavoro (17/11/2026)
+
+Sostituisce la scheda di produzione e il programma a righe delle versioni 0.3–0.4 (mai andati in produzione).
+
+- **Production Plan** e **Material List** si aprono direttamente dal dettaglio evento come fogli già pronti: nessuna
+  panoramica, nessuna finestra, nessun pulsante "aggiungi".
+- Griglia nativa: ogni cella si scrive direttamente, frecce/Tab/Invio, Ctrl+Invio inserisce riga, Ctrl+Canc la toglie,
+  Ctrl+D riempie in basso, Ctrl+Z/Y annulla e ripete, selezione con Maiusc+frecce o trascinando, **copia/incolla di blocchi da Excel**.
+- Plan: intestazione dall'evento, Technical Crew (suggerisce persone già usate e compila ruolo e contatti), Production Schedule
+  00:00–24:00 ogni 30 minuti, 19 attività nel menu più testo libero, colonna Section (Pre Show / Show / altre),
+  orari veloci (`1645`, `1645-1830`), una scheda per giornata dei festival, "Sort by time".
+- Material List: location illimitate scrivendone il nome, voci con Quantity/Unit/Notes, **duplica location**, libreria
+  dei materiali già usati (aiuto, non obbligo).
+- Documento finale: Generate PdP / Generate list, Copy Text, Print / Save PDF, Download PDF, inglese o italiano.
+- Salvataggio automatico con unione delle modifiche se due persone lavorano insieme; riprova da solo se manca la rete.
+- Un festival (più eventi) condivide un solo Plan e una sola Material List (menu nel dettaglio evento).
+- **Backend:** schema v4 (`documenti`, `documenti_parti`); rimossi giornate, spazi, squadra e rubrica dall'interfaccia
+  (le tabelle restano nel foglio). Serve aggiornare Apps Script e rieseguire il setup.
+
 ## 0.4.0 · Scheda di produzione, tappa 2: programma (Production Schedule) e PDF (17/11/2026)
 
 - Nuovo blocco **Programma** nella scheda di produzione: una tabella per giornata con Start, End, Activity,

@@ -31,11 +31,13 @@ const BLU = [31, 56, 94];
 const GRIGIO = [90, 98, 110];
 const LINEA = [60, 66, 76];
 
-/** Crea il PDF e lo scarica. Restituisce il documento jsPDF (usato dai test). */
+const AZZURRO = [221, 229, 241];
+
+/** Crea il PDF di un documento (plan o materiali) e lo scarica. Restituisce il documento jsPDF (usato dai test). */
 export async function creaPdf(d, nome) {
   const jsPDF = await carica();
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-  pdf.setProperties({ title: testoPdf(d.titolo + ' · ' + d.intestazione[0][1]), creator: 'CTRL' });
+  pdf.setProperties({ title: testoPdf(d.titolo + ' · ' + d.nomeEvento), creator: 'CTRL' });
   const M = 15;
   const W = pdf.internal.pageSize.getWidth();
   const H = pdf.internal.pageSize.getHeight();
@@ -63,52 +65,49 @@ export async function creaPdf(d, nome) {
     styles: { font: 'helvetica', fontSize: 9, cellPadding: 1.8, textColor: [20, 20, 20], lineColor: LINEA, lineWidth: 0.2, valign: 'top', overflow: 'linebreak' },
     headStyles: { fillColor: BLU, textColor: [255, 255, 255], fontStyle: 'bold' }
   };
-
-  const titolo = (t) => {
+  const titolo = (t, dim = 13) => {
     if (y > H - 40) { pdf.addPage(); y = M + 5; }
-    pdf.setFont('helvetica', 'bold').setFontSize(13).setTextColor(...BLU);
+    pdf.setFont('helvetica', 'bold').setFontSize(dim).setTextColor(...BLU);
     pdf.text(testoPdf(t), M, y);
     y += 3;
   };
+  const vuoto = (t) => {
+    pdf.setFont('helvetica', 'italic').setFontSize(9).setTextColor(...GRIGIO);
+    y += 4; pdf.text(testoPdf(t), M, y); y += 6;
+  };
+  const banda = (nome, colonne) => [{ content: testoPdf(nome.toUpperCase()), colSpan: colonne, styles: { fillColor: AZZURRO, textColor: BLU, fontStyle: 'bold' } }];
 
-  d.giorni.forEach(g => {
-    titolo(g.titolo);
-    if (g.righe.length) {
+  if (d.tipo === 'plan') {
+    if (d.crew.length) {
+      titolo(d.crewTitolo);
+      pdf.autoTable({ ...stile, startY: y, head: [d.colCrew.map(testoPdf)], body: d.crew.map(r => r.map(testoPdf)) });
+      y = pdf.lastAutoTable.finalY + 7;
+    }
+    titolo(d.scheduleTitolo);
+    d.giorni.forEach(g => {
+      if (g.titolo) { y += 4; titolo(g.titolo, 11); }
+      if (!g.sezioni.length) { vuoto(d.T.vuoto); return; }
+      const body = [];
+      g.sezioni.forEach(s => { body.push(banda(s.nome, 4)); s.righe.forEach(r => body.push(r.map(testoPdf))); });
       pdf.autoTable({
-        ...stile, startY: y,
-        head: [d.T.colonne.map(testoPdf)],
-        body: g.righe.map(r => r.map(testoPdf)),
-        columnStyles: { 0: { cellWidth: 26, fontStyle: 'bold' }, 1: { cellWidth: 34 }, 2: { cellWidth: 30 }, 3: { cellWidth: 34 } }
+        ...stile, startY: y + 1, head: [d.colSchedule.map(testoPdf)], body,
+        columnStyles: { 0: { cellWidth: 30, fontStyle: 'bold' }, 1: { cellWidth: 44 }, 2: { cellWidth: 34 } }
       });
-      y = pdf.lastAutoTable.finalY + 5;
-    } else {
-      pdf.setFont('helvetica', 'italic').setFontSize(9).setTextColor(...GRIGIO);
-      y += 4;
-      pdf.text(testoPdf(d.T.vuoto), M, y);
-      y += 6;
-    }
-    if (g.note) {
-      pdf.setFontSize(9).setTextColor(20, 20, 20);
-      const etichetta = testoPdf(d.T.noteGiorno + ': ');
-      pdf.setFont('helvetica', 'bold');
-      const lw = pdf.getTextWidth(etichetta);
-      const righe = pdf.splitTextToSize(testoPdf(g.note), W - 2 * M - lw);
-      if (y + righe.length * 4.2 > H - M - 6) { pdf.addPage(); y = M + 5; }
-      pdf.text(etichetta, M, y);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(righe, M + lw, y);
-      y += righe.length * 4.2 + 4;
-    }
-    y += 3;
-  });
-
-  if (d.contatti.length) {
-    titolo(d.T.contatti);
-    pdf.autoTable({ ...stile, startY: y, head: [d.T.colContatti.map(testoPdf)], body: d.contatti.map(r => r.map(testoPdf)) });
-    y = pdf.lastAutoTable.finalY + 5;
+      y = pdf.lastAutoTable.finalY + 6;
+    });
+  } else {
+    if (!d.sezioni.length) vuoto(d.T.vuotoM);
+    d.sezioni.forEach(s => {
+      if (y > H - 50) { pdf.addPage(); y = M + 5; }
+      titolo(s.nome);
+      pdf.autoTable({
+        ...stile, startY: y + 1, head: [d.colonne.map(testoPdf)], body: s.righe.map(r => r.map(testoPdf)),
+        columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 16, halign: 'right' }, 2: { cellWidth: 20 } }
+      });
+      y = pdf.lastAutoTable.finalY + 7;
+    });
   }
 
-  // piè di pagina su ogni pagina
   const n = pdf.getNumberOfPages();
   for (let i = 1; i <= n; i++) {
     pdf.setPage(i);
@@ -116,7 +115,6 @@ export async function creaPdf(d, nome) {
     pdf.text(testoPdf(d.aggiornato), M, H - 8);
     pdf.text(testoPdf(`${d.T.pagina} ${i} ${d.T.di} ${n}`), W - M, H - 8, { align: 'right' });
   }
-
   pdf.save(nome);
   return pdf;
 }

@@ -38,7 +38,9 @@ async function setup(page, { calendarEvents = calendar() } = {}) {
   env.failSalva = 0; // simula la rete che cade sui salvataggi della scheda
   await page.route(API, async (route) => {
     const body = route.request().postData();
-    if (env.failSalva > 0 && JSON.parse(body).action === 'produzione.salva') { env.failSalva--; return route.abort('internetdisconnected'); }
+    const azione = JSON.parse(body).action;
+    if (env.failSalva > 0 && azione === 'documento.salva') { env.failSalva--; return route.abort('internetdisconnected'); }
+    if (env.primaDelSalvataggio && azione === 'documento.salva') { const f = env.primaDelSalvataggio; env.primaDelSalvataggio = null; f(); }
     const out = JSON.parse(JSON.stringify(env.ctx.handleRequest(body)));
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
   });
@@ -248,361 +250,372 @@ test('file allegati: carico un rider, scarico identico, rifiuto oltre 20 MB, tol
   await noHorizontalScroll(page);
 });
 
-// ---------------- Tappa 1: scheda di produzione ----------------
+// ---------------- Production Plan e Material List: fogli di lavoro ----------------
 
-test('scheda di produzione: creo dall\'evento, struttura e squadra si salvano da sole e restano dopo il ricaricamento', async ({ page }, info) => {
+const cella = (page, foglio, colonna, riga) => page.getByLabel(`${foglio} · ${colonna} · riga ${riga}`, { exact: true });
+const incolla = (page, label, tsv) => page.getByLabel(label, { exact: true }).evaluate((el, t) => {
+  const dt = new DataTransfer(); dt.setData('text/plain', t); el.focus();
+  el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+}, tsv);
+const salvato = (page) => expect(page.locator('.save-ind')).toHaveText(/Salvato alle|Tutto salvato/, { timeout: 15000 });
+const righeDoc = (env, tipo) => {
+  const ss = env.getSS(env.state.props.DB_ID);
+  const doc = ss.getSheetByName('documenti').rows().slice(1).filter(r => r[2] === tipo).pop();   // l'ultimo creato
+  if (!doc) return null;
+  const parti = ss.getSheetByName('documenti_parti').rows().slice(1).filter(r => r[1] === doc[0]).sort((a, b) => a[2] - b[2]);
+  return JSON.parse(parti.map(r => r[3]).join(''));
+};
+const apriPlan = async (page, env, titolo = 'Cantelmo: Maria Mazzotta') => {
+  await openEvent(page, env, titolo);
+  await page.getByRole('button', { name: /Production Plan/ }).click();
+  await expect(page.getByRole('heading', { name: 'Production Plan' })).toBeVisible();
+  await expect(page.locator('.programma tbody tr')).toHaveCount(49);
+};
+
+const FRISELL = '16:45-18:30\tSoundcheck\tMain Stage\tBill Frisell Trio\n19:30\tDoors Open\tEntrance\t\n21:00\tShow Start\tMain Stage\t90 min\n22:30\tShow End\t\t';
+
+test('Production Plan: si apre subito come foglio pronto, senza modali né pulsanti "aggiungi"', async ({ page }, info) => {
   const env = await setup(page);
-  const adm = tokenFor(env, ADMIN);
-  // una persona già in rubrica (da un altro evento)
-  const altra = apiCall(env, adm, 'produzione.crea', { evento_id: apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo.startsWith('Convegno')).id }).data;
-  apiCall(env, adm, 'produzione.salva', { id: altra.id, ops: [{ tipo: 'persona', azione: 'crea', id: 'per_rubrica000001', campi: { nome: 'Federico Rizzello', ruolo: 'Tecnico luci', telefono: '+39 333 111 2222' } }] });
-
-  await openEvent(page, env);
-  await page.getByRole('button', { name: 'Crea scheda di produzione' }).click();
-  await expect(page.getByRole('textbox', { name: 'Nome della scheda di produzione' })).toHaveValue('Cantelmo: Maria Mazzotta');
-  await expect(page.locator('.tile', { hasText: 'Struttura' })).toContainText('1 giornata · 1 spazio');
-  await expect(page.locator('.avvisi')).toContainText('Squadra vuota');
-  await page.screenshot({ path: `test-results/prod-panoramica-${info.project.name}.png`, fullPage: true });
-
-  // titolo
-  await page.getByRole('textbox', { name: 'Nome della scheda di produzione' }).fill('Maria Mazzotta · Cantelmo');
-  // struttura
-  await page.locator('.prod-nav').getByRole('link', { name: /Struttura/ }).click();
-  await page.getByLabel('Data della nuova giornata').fill(isoDay(1));
-  await page.getByRole('button', { name: 'Aggiungi giornata' }).click();
-  await page.getByLabel('Etichetta del ' + isoDay(1)).fill('Montaggio');
-  await page.getByLabel('Nome del nuovo spazio').fill('Palco principale');
-  await page.getByRole('button', { name: 'Aggiungi spazio' }).click();
-  const palco = page.locator('.lrow.spa').nth(1);
-  await palco.getByLabel('Tipo di spazio').selectOption('palco');
-  await palco.getByLabel('Note dello spazio').fill('Pedane 6x4, corrente 32A');
-  await page.getByRole('button', { name: 'Sposta su Palco principale' }).click();
-  await expect(page.locator('.lrow.spa').first().getByLabel('Nome dello spazio')).toHaveValue('Palco principale');
-  // nome vuoto: segnalato e non inviato
-  await page.locator('.lrow.spa').nth(1).getByLabel('Nome dello spazio').fill('');
-  await expect(page.locator('.lrow.spa').nth(1).getByLabel('Nome dello spazio')).toHaveAttribute('aria-invalid', 'true');
-  await page.locator('.lrow.spa').nth(1).getByLabel('Nome dello spazio').fill('Officine Cantelmo');
-  await expect(page.locator('.save-ind')).toHaveText(/Salvato alle/);
+  await apriPlan(page, env);
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /aggiungi/i })).toHaveCount(0);
+  const dl = page.locator('dl.intestazione');
+  await expect(dl).toContainText('Cantelmo: Maria Mazzotta');
+  await expect(dl).toContainText('Officine Cantelmo');
+  await expect(dl).toContainText('Lecce');
+  await expect(page.locator('.griglia').first().locator('tbody tr')).toHaveCount(8);                 // crew già pronta
+  expect(await cella(page, 'Schedule', 'Time', 1).inputValue()).toBe('00:00');
+  expect(await cella(page, 'Schedule', 'Time', 49).inputValue()).toBe('24:00');
+  expect(await cella(page, 'Schedule', 'Time', 4).inputValue()).toBe('01:30');
+  await expect(cella(page, 'Schedule', 'Section', 1)).toHaveAttribute('placeholder', 'Pre Show');
   await noHorizontalScroll(page);
-  await page.screenshot({ path: `test-results/prod-struttura-${info.project.name}.png`, fullPage: true });
-
-  // persone: una nuova e una dalla rubrica
-  await page.locator('.prod-nav').getByRole('link', { name: /Persone/ }).click();
-  const cerca = page.getByLabel('Cerca o aggiungi una persona');
-  await cerca.fill('Manuel');
-  await page.getByRole('option', { name: 'Nuova persona «Manuel»' }).click();
-  await page.getByLabel('Ruolo', { exact: true }).fill('Fonico');
-  await page.getByLabel('Telefono', { exact: true }).fill('+39 333 000 0000');
-  await page.getByLabel('Email', { exact: true }).fill('non-email');
-  await page.getByRole('button', { name: 'Aggiungi alla squadra' }).click();
-  await expect(page.getByText('Email non valida.')).toBeVisible();
-  await page.getByLabel('Email', { exact: true }).fill('manuel@example.com');
-  await page.getByRole('button', { name: 'Aggiungi alla squadra' }).click();
-  await expect(page.getByText('Manuel aggiunto alla squadra')).toBeVisible();
-  await cerca.fill('luci');
-  await page.getByRole('option', { name: /Federico Rizzello/ }).click();
-  await page.getByLabel('Spazio di Federico Rizzello').selectOption({ label: 'Palco principale' });
-  await page.getByLabel('Ruolo di Manuel in questo evento').fill('Fonico di sala');
-  await expect(page.locator('.save-ind')).toHaveText(/Salvato alle/);
-  await noHorizontalScroll(page);
-  await page.screenshot({ path: `test-results/prod-persone-${info.project.name}.png`, fullPage: true });
-
-  // nel database
-  const db = env.getSS(env.state.props.DB_ID);
-  const pr = db.getSheetByName('progetti').rows().find(r => r[1] === 'Maria Mazzotta · Cantelmo');
-  expect(pr).toBeTruthy();
-  const pid = pr[0];
-  expect(db.getSheetByName('giornate').rows().filter(r => r[1] === pid).map(r => [r[2], r[3]]).sort()).toEqual([[isoDay(1), 'Montaggio'], [isoDay(2), '']]);
-  const spazi = db.getSheetByName('location').rows().filter(r => r[1] === pid);
-  expect(spazi.find(r => r[2] === 'Palco principale')[6]).toBe('palco');
-  const sq = db.getSheetByName('squadra').rows().filter(r => r[1] === pid);
-  expect(sq.length).toBe(2);
-
-  // ricarico: tutto è ancora lì
-  await page.reload();
-  await expect(page.getByText('Manuel', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Ruolo di Manuel in questo evento')).toHaveValue('Fonico di sala');
-  await expect(page.getByLabel('Spazio di Federico Rizzello')).toHaveValue(spazi.find(r => r[2] === 'Palco principale')[0]);
-  await page.locator('.prod-nav').getByRole('link', { name: /Panoramica/ }).click();
-  await expect(page.locator('.tile', { hasText: 'Persone' })).toContainText('2 in squadra');
-  await expect(page.getByText('Nessun avviso.')).toBeVisible();
-  // dal dettaglio evento si vede il riepilogo
-  await page.getByRole('link', { name: 'Evento' }).click();
-  await expect(page.locator('.prod-card')).toContainText('2 giornate, 2 spazi');
+  await page.screenshot({ path: `test-results/plan-vuoto-${info.project.name}.png` });
+  expect(righeDoc(env, 'plan')).toBe(null);   // niente viene salvato finché non scrivi
 });
 
-test('festival: aggiungo un secondo evento alla scheda e le giornate si aggiornano', async ({ page }) => {
+test('Production Plan: compilo solo con la tastiera (menu attività, Tab, Invio), si salva da solo e resta dopo il ricaricamento', async ({ page }) => {
+  const env = await setup(page);
+  await apriPlan(page, env);
+  await cella(page, 'Crew', 'Name', 1).click();
+  await page.keyboard.type('Mario Rossi');
+  await page.keyboard.press('Tab'); await page.keyboard.type('FOH');
+  await page.keyboard.press('Tab'); await page.keyboard.type('393 111');
+  await page.keyboard.press('Tab'); await page.keyboard.type('mario@x.it');
+  await cella(page, 'Schedule', 'Time', 17).click();                                               // 08:00
+  await page.keyboard.type('930');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('sound');
+  await expect(page.getByRole('option', { name: 'Soundcheck' })).toBeVisible();
+  await page.keyboard.press('Tab');                                                                 // sceglie dal menu e va a Location
+  expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('Soundcheck');
+  await page.keyboard.type('Main Stage');
+  await page.keyboard.press('Tab'); await page.keyboard.type('con il trio');
+  await page.keyboard.press('Enter');                                                               // scende di riga, stessa colonna
+  await expect(cella(page, 'Schedule', 'Details / Notes', 18)).toBeFocused();
+  expect(await cella(page, 'Schedule', 'Time', 17).inputValue()).toBe('09:30');                     // normalizzato
+  await salvato(page);
+  await page.reload();
+  await expect(page.locator('.programma tbody tr')).toHaveCount(49);
+  expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('Soundcheck');
+  expect(await cella(page, 'Schedule', 'Location', 17).inputValue()).toBe('Main Stage');
+  expect(await cella(page, 'Crew', 'Role', 1).inputValue()).toBe('FOH');
+  const j = righeDoc(env, 'plan');
+  expect(j.crew).toHaveLength(1);
+  expect(j.giorni[0].righe).toHaveLength(49);
+});
+
+test('Production Plan: incollo un blocco da Excel in un colpo; Show Start porta in Show; documento ordinato per orario', async ({ page }, info) => {
+  const env = await setup(page);
+  await apriPlan(page, env);
+  await incolla(page, 'Schedule · Time · riga 5', '10:00\tLoad-out\tBack\tfinale\n');   // riga scritta in alto con un orario più tardi: il documento la riordina
+  await incolla(page, 'Schedule · Time · riga 17', FRISELL);
+  expect(await cella(page, 'Schedule', 'Time', 17).inputValue()).toBe('16:45 – 18:30');
+  expect(await cella(page, 'Schedule', 'Activity', 19).inputValue()).toBe('Show Start');
+  await expect(cella(page, 'Schedule', 'Section', 19)).toHaveValue('Show');
+  await expect(cella(page, 'Schedule', 'Section', 20)).toHaveAttribute('placeholder', 'Show');   // eredita
+  await page.getByRole('button', { name: 'Generate PdP' }).click();
+  const doc = page.locator('article.doc');
+  await expect(doc.getByRole('heading', { name: 'Production Plan' })).toBeVisible();
+  await expect(doc).toContainText('Officine Cantelmo');
+  const bande = await doc.locator('.doc-banda').allTextContents();
+  expect(bande).toEqual(['PRE SHOW', 'SHOW']);
+  const ore = await doc.locator('table.prog tbody tr:not(.doc-banda) td:first-child').allTextContents();
+  expect(ore).toEqual(['10:00', '16:45 – 18:30', '19:30', '21:00', '22:30']);   // 10:00 era sopra, ma il documento è ordinato
+  await expect(doc.locator('table.prog')).toContainText('Bill Frisell Trio');
+  await noHorizontalScroll(page);
+  await page.screenshot({ path: `test-results/plan-documento-${info.project.name}.png`, fullPage: true });
+  await doc.waitFor();
+  // lingua
+  await page.getByLabel('Language').selectOption('it');
+  await expect(doc.getByRole('heading', { name: 'Piano di produzione' })).toBeVisible();
+  await page.getByLabel('Language').selectOption('en');
+  // testo copiato
+  await page.getByRole('button', { name: 'Copy Text' }).click();
+  await expect(page.locator('#toast')).toHaveText(/Testo copiato|Copia non riuscita/);
+  // PDF scaricato con i dati veri
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download PDF' }).click()]);
+  expect(dl.suggestedFilename()).toBe(`Production Plan - Cantelmo Maria Mazzotta - ${isoDay(2)}.pdf`);
+  const fs = await import('node:fs');
+  fs.copyFileSync(await dl.path(), `test-results/production-plan-${info.project.name}.pdf`);
+  const pdf = fs.readFileSync(await dl.path()).toString('latin1');
+  expect(pdf.startsWith('%PDF-')).toBe(true);
+  for (const t of ['Production Plan', 'Soundcheck', 'Bill Frisell Trio', 'Officine Cantelmo', 'PRE SHOW', 'Show Start']) expect(pdf, t).toContain(t);
+  // in stampa si vede solo il documento
+  await page.emulateMedia({ media: 'print' });
+  await expect(doc).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
+  // chiudo e torno al foglio con i dati
+  await page.getByRole('button', { name: 'Close' }).click();
+  expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('Soundcheck');
+});
+
+test('Production Plan: ordina per orario, inserisci e togli righe, annulla, copia di più celle', async ({ page }) => {
+  const env = await setup(page);
+  await apriPlan(page, env);
+  await cella(page, 'Schedule', 'Activity', 17).fill('Setup');
+  await cella(page, 'Schedule', 'Activity', 18).fill('Soundcheck');
+  await cella(page, 'Schedule', 'Time', 17).fill('1600');
+  await cella(page, 'Schedule', 'Time', 18).fill('1000');
+  await cella(page, 'Schedule', 'Time', 18).blur();
+  await page.getByRole('button', { name: 'Sort by time' }).click();
+  const ordinate = await page.locator('.programma tbody tr').evaluateAll(rs => rs.map(r => r.querySelector('input[aria-label*="Activity"]').value).filter(Boolean));
+  expect(ordinate).toEqual(['Soundcheck', 'Setup']);
+  // inserisci riga sotto con Ctrl+Invio, poi eliminala con Ctrl+Canc
+  await cella(page, 'Schedule', 'Activity', 10).click();
+  await page.keyboard.press('Control+Enter');
+  await expect(page.locator('.programma tbody tr')).toHaveCount(50);
+  await page.keyboard.press('Control+Delete');
+  await expect(page.locator('.programma tbody tr')).toHaveCount(49);
+  // annulla: scrivo, annullo
+  await cella(page, 'Schedule', 'Details / Notes', 5).click();
+  await page.keyboard.type('prova');
+  await page.keyboard.press('Control+z');
+  expect(await cella(page, 'Schedule', 'Details / Notes', 5).inputValue()).toBe('');
+  // selezione con Maiusc+freccia e copia come testo tabulato
+  await cella(page, 'Schedule', 'Time', 3).click();
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Shift+ArrowRight');
+  const copiato = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    document.activeElement.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }));
+    return dt.getData('text/plain');
+  });
+  expect(copiato).toBe('01:00\t\n01:30\t');
+  await page.keyboard.press('Delete');                                                     // più celle: le svuota
+  expect(await cella(page, 'Schedule', 'Time', 3).inputValue()).toBe('');
+  await page.keyboard.press('Control+z');
+  expect(await cella(page, 'Schedule', 'Time', 3).inputValue()).toBe('01:00');
+});
+
+test('Production Plan: più giornate, una scheda per tutto il festival, due eventi condividono lo stesso foglio', async ({ page }) => {
   const env = await setup(page);
   await openEvent(page, env, 'Convegno Museo Castromediano');
-  await page.getByRole('button', { name: 'Crea scheda di produzione' }).click();
-  await expect(page.locator('.tile', { hasText: 'Struttura' })).toContainText('3 giornate');
-  await page.getByLabel('Cerca un evento da aggiungere').fill('swing');
-  await page.getByRole('option', { name: /Swing night/ }).click();
-  await expect(page.getByText('Evento aggiunto: giornate aggiornate')).toBeVisible();
-  await expect(page.locator('.tile', { hasText: 'Struttura' })).toContainText('4 giornate');
-  await expect(page.getByText('Scheda di produzione · festival')).toBeVisible();
-  await expect(page.locator('.ev-link')).toHaveCount(2);
-  await page.getByRole('button', { name: /Togli Cantelmo: Swing night/ }).click();
-  await page.getByRole('button', { name: /Conferma: Togli Cantelmo: Swing night/ }).click();
-  await expect(page.locator('.ev-link')).toHaveCount(1);
+  await page.getByRole('button', { name: /Production Plan/ }).click();
+  await expect(page.locator('.giorni .seg-b')).toHaveCount(3);
+  await cella(page, 'Schedule', 'Activity', 17).fill('Registrazione');
+  await page.locator('.giorni .seg-b').nth(1).click();
+  expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('');
+  await cella(page, 'Schedule', 'Activity', 17).fill('Plenaria');
+  await salvato(page);
+  await page.getByRole('link', { name: 'Event', exact: true }).click();
+  await page.getByText('Festival: condividi con altri eventi').click();
+  await page.getByLabel('Collega un altro evento').selectOption({ label: isoDay(2) + ' · Cantelmo: Maria Mazzotta' });
+  await expect(page.getByText(/Condivisi con:/)).toBeVisible();
+  const j = righeDoc(env, 'plan');
+  expect(j.giorni.map(g => g.righe.find(r => r.att)?.att)).toEqual(['Registrazione', 'Plenaria', undefined]);   // il documento nuovo ha solo le 3 giornate del convegno
+  // dall'altro evento si apre lo stesso foglio
+  await page.goto('/#/');
+  await page.getByText('Cantelmo: Maria Mazzotta').first().click();
+  await page.getByRole('link', { name: /Production Plan/ }).click();
+  await expect(page.locator('dl.intestazione')).toContainText('Convegno Museo Castromediano');
+  await expect(page.locator('.giorni .seg-b')).toHaveCount(4);                       // la data del nuovo evento si è aggiunta
+  await page.locator('.giorni .seg-b').nth(1).click();
+  expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('Registrazione');
+});
+
+test('Production Plan: la crew suggerisce persone già usate in altre produzioni e compila ruolo e contatti', async ({ page }) => {
+  const env = await setup(page);
+  const adm = tokenFor(env, ADMIN);
+  const lista = apiCall(env, adm, 'eventi.list', {}).data;
+  const a = apiCall(env, adm, 'produzione.assicura', { evento_id: lista.find(e => e.titolo.startsWith('Convegno')).id }).data;
+  apiCall(env, adm, 'documento.salva', { produzione_id: a.id, tipo: 'plan', versione: '0', dati: { crew: [{ id: 'c1', nome: 'Cesare Liaci', ruolo: 'Direttore di produzione', telefono: '340 000 0000', email: 'c@x.it' }], giorni: [] } });
+  await apriPlan(page, env);
+  await cella(page, 'Crew', 'Name', 1).click();
+  await page.keyboard.type('ces');
+  await expect(page.getByRole('option', { name: /Cesare Liaci/ })).toBeVisible();
+  await page.keyboard.press('Enter');
+  expect(await cella(page, 'Crew', 'Name', 1).inputValue()).toBe('Cesare Liaci');
+  expect(await cella(page, 'Crew', 'Role', 1).inputValue()).toBe('Direttore di produzione');
+  expect(await cella(page, 'Crew', 'Phone', 1).inputValue()).toBe('340 000 0000');
+  // incollo 10 nominativi da Excel: la tabella cresce da sola
+  const tsv = Array.from({ length: 10 }, (_, i) => `Tecnico ${i + 1}\tFonico\t333 00${i}\tt${i}@x.it`).join('\n');
+  await incolla(page, 'Crew · Name · riga 2', tsv);
+  await expect(page.locator('.griglia').first().locator('tbody tr')).toHaveCount(12);
+  expect(await cella(page, 'Crew', 'Email', 11).inputValue()).toBe('t9@x.it');
+});
+
+test('salvataggio: un altro utente salva nel frattempo, le due modifiche si uniscono senza perdere nulla', async ({ page }) => {
+  const env = await setup(page);
+  await apriPlan(page, env);
+  await cella(page, 'Schedule', 'Activity', 17).fill('Mia attività');
+  const adm = tokenFor(env, ADMIN);
+  const prId = page.url().match(/#\/p\/([\w-]+)/)[1];
+  env.primaDelSalvataggio = () => {
+    const cur = apiCall(env, adm, 'documento.get', { produzione_id: prId, tipo: 'plan' }).data;
+    const dati = cur.dati || { crew: [], giorni: [] };
+    dati.crew = [{ id: 'c_altro', nome: 'Altra persona', ruolo: 'Stage', telefono: '', email: '' }];
+    apiCall(env, adm, 'documento.salva', { produzione_id: prId, tipo: 'plan', versione: cur.versione, dati });
+  };
+  await salvato(page);
+  await expect.poll(() => (righeDoc(env, 'plan').giorni[0].righe.find(r => r.att) || {}).att).toBe('Mia attività');
+  const j = righeDoc(env, 'plan');
+  expect(j.crew.map(c => c.nome)).toEqual(['Altra persona']);
+  await expect(cella(page, 'Crew', 'Name', 1)).toHaveValue('Altra persona');   // l'unione è tornata sullo schermo
+  expect(await cella(page, 'Schedule', 'Activity', 17).inputValue()).toBe('Mia attività');
 });
 
 test('rete che cade durante il salvataggio: riprova da solo, nessun dato perso né duplicato', async ({ page }) => {
   const env = await setup(page);
-  await openEvent(page, env);
-  await page.getByRole('button', { name: 'Crea scheda di produzione' }).click();
-  await page.locator('.prod-nav').getByRole('link', { name: /Struttura/ }).click();
+  await apriPlan(page, env);
   env.failSalva = 2;
-  await page.getByLabel('Nome del nuovo spazio').fill('Camerino');
-  await page.getByRole('button', { name: 'Aggiungi spazio' }).click();
-  await expect(page.locator('.save-ind')).toHaveText('Rete assente, riprovo…');
-  await page.locator('.lrow.spa').nth(1).getByLabel('Note dello spazio').fill('Secondo piano');
-  await expect(page.locator('.save-ind')).toHaveText(/Salvato alle/, { timeout: 20000 });
-  const rows = env.getSS(env.state.props.DB_ID).getSheetByName('location').rows().filter(r => r[2] === 'Camerino');
-  expect(rows.length).toBe(1);
-  expect(rows[0][4]).toBe('Secondo piano');
+  await cella(page, 'Schedule', 'Activity', 17).fill('Soundcheck');
+  await expect(page.locator('.save-ind')).toHaveText('Rete assente, riprovo…', { timeout: 10000 });
+  await expect(page.locator('.save-ind')).toHaveText(/Salvato alle/, { timeout: 25000 });
+  const j = righeDoc(env, 'plan');
+  expect(j.giorni[0].righe.filter(r => r.att === 'Soundcheck')).toHaveLength(1);
+  expect(env.getSS(env.state.props.DB_ID).getSheetByName('documenti').rows().length).toBe(2);   // intestazione + un solo documento
 });
 
-test('sola lettura: vede scheda e file, non crea, non modifica, non carica', async ({ page }) => {
+test('sola lettura: vede i fogli e genera il documento, ma non può scrivere né salvare', async ({ page }) => {
   const env = await setup(page);
   const adm = tokenFor(env, ADMIN);
-  const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo === 'Convegno Museo Castromediano').id;
-  const p = apiCall(env, adm, 'produzione.crea', { evento_id: evId }).data;
-  apiCall(env, adm, 'produzione.salva', { id: p.id, ops: [
-    { tipo: 'persona', azione: 'crea', id: 'per_letturatest01', campi: { nome: 'Cesare', telefono: '340 000' } },
-    { tipo: 'squadra', azione: 'crea', id: 'sq_letturatest001', campi: { persona_id: 'per_letturatest01', ruolo: 'Direttore di produzione' } }] });
-  apiCall(env, adm, 'allegati.carica', { evento_id: evId, sezione: 'piano', nome: 'piano.pdf', mime: 'application/pdf', dati: Buffer.from('PIANO').toString('base64') });
+  const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo === 'Cantelmo: Maria Mazzotta').id;
+  const p = apiCall(env, adm, 'produzione.assicura', { evento_id: evId }).data;
+  apiCall(env, adm, 'documento.salva', { produzione_id: p.id, tipo: 'plan', versione: '0', dati: { crew: [], giorni: [{ id: 'g1', data: isoDay(2), righe: [{ id: 'r1', sez: '', ora: '18:00', att: 'Doors Open', loc: '', note: '' }] }] } });
   apiCall(env, adm, 'utenti.save', { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'LETTURA' });
   await login(page, env, 'tecnico@example.com');
-  await page.getByText('Convegno Museo Castromediano').click();
-  await expect(page.getByText('Allega file')).toHaveCount(0);
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Scarica piano\.pdf/ }).click()]);
-  const fs = await import('node:fs');
-  expect(fs.readFileSync(await dl.path()).toString()).toBe('PIANO');
-  await page.getByRole('link', { name: 'Apri scheda' }).click();
-  await expect(page.getByRole('heading', { name: 'Convegno Museo Castromediano' })).toBeVisible();
-  await expect(page.locator('main.prod input, main.prod select, main.prod textarea')).toHaveCount(0);
-  await page.locator('.prod-nav').getByRole('link', { name: /Persone/ }).click();
-  await expect(page.getByText('Direttore di produzione')).toBeVisible();
-  await expect(page.locator('main.prod input, main.prod select, main.prod textarea')).toHaveCount(0);
+  await page.getByText('Cantelmo: Maria Mazzotta').click();
+  await page.getByRole('link', { name: /Production Plan/ }).click();
+  await expect(page.getByRole('heading', { name: 'Production Plan' })).toBeVisible();
+  await expect(page.locator('.griglia input:not([readonly])')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+  await expect(page.locator('.save-ind')).toHaveText('Sola lettura');
+  await page.getByRole('button', { name: 'Generate PdP' }).click();
+  await expect(page.locator('article.doc')).toContainText('Doors Open');
+  const r = apiCall(env, tokenFor(env, 'tecnico@example.com'), 'documento.salva', { produzione_id: p.id, tipo: 'plan', versione: '1', dati: { crew: [], giorni: [] } });
+  expect(r.ok).toBe(false);
 });
 
-// ---------------- Tappa 2: programma (Production Schedule) ----------------
+// ---------------- Material List ----------------
 
-/** Riga n (da 0) della tabella del programma. */
-const riga = (page, n) => page.locator('.sched .srow[data-id]').nth(n);
-const inizi = (page) => page.locator('.sched .srow[data-id]').evaluateAll(rs => rs.map(r => r.querySelector('[data-f="inizio"]').value));
-const salvato = (page) => expect(page.locator('.save-ind')).toHaveText(/Salvato alle/);
+const apriMateriali = async (page, env, titolo = 'Cantelmo: Maria Mazzotta') => {
+  await openEvent(page, env, titolo);
+  await page.getByRole('button', { name: /Material List/ }).click();
+  await expect(page.getByRole('heading', { name: 'Material List' })).toBeVisible();
+};
 
-test('programma: compilo il Production Schedule in tabella, ordine cronologico, sovrapposizioni, duplica, Invio, note; resta dopo il ricaricamento', async ({ page }, info) => {
+test('Material List: foglio già pronto, scrivo location e voci, incollo da Excel, duplico, documento e PDF', async ({ page }, info) => {
   const env = await setup(page);
-  await openEvent(page, env);
-  await page.getByRole('button', { name: 'Crea scheda di produzione' }).click();
-  await page.locator('.prod-nav').getByRole('link', { name: /Programma/ }).click();
-  await expect(page.getByText('Nessuna attività in questa giornata.')).toBeVisible();
-
-  // prima attività: orario scritto in fretta
-  await page.getByRole('button', { name: 'Add Activity' }).click();
-  let r = riga(page, 0);
-  await expect(r.getByLabel('Start')).toBeFocused();
-  await r.getByLabel('Start').fill('1630');
-  await r.getByLabel('Start').press('Tab');
-  await expect(r.getByLabel('Start')).toHaveValue('16:30');
-  await r.getByLabel('End').fill('18.30');
-  await r.getByLabel('End').press('Tab');
-  await expect(r.getByLabel('End')).toHaveValue('18:30');
-  await r.getByLabel('Activity').selectOption('Soundcheck');
-  await r.getByLabel('Location').selectOption({ label: 'Officine Cantelmo' });
-  await r.getByLabel('Responsible').fill('Maria Mazzotta');
-  await r.getByLabel('Details / Notes').fill('Line check 16:15');
-  // orario non valido: segnalato, non salvato
-  await r.getByLabel('End').fill('25');
-  await r.getByLabel('End').press('Tab');
-  await expect(r.getByLabel('End')).toHaveAttribute('aria-invalid', 'true');
-  await r.getByLabel('End').fill('1830');
-  await r.getByLabel('End').press('Tab');
-  await expect(r.getByLabel('End')).not.toHaveAttribute('aria-invalid', 'true');
-
-  // seconda: parte dalla fine della precedente; attività personalizzata
-  await page.getByRole('button', { name: 'Add Activity' }).click();
-  r = riga(page, 1);
-  await expect(r.getByLabel('Start')).toHaveValue('18:30');
-  await r.getByLabel('Activity').selectOption('Custom');
-  await expect(r.getByLabel('Nome attività personalizzata')).toBeFocused();
-  await r.getByLabel('Nome attività personalizzata').fill('Cena presso Anima e Cuore');
-  await r.getByLabel('Start').fill('19:00');
-  await r.getByLabel('Start').press('Tab');
-
-  // terza alle 08:00: va in cima da sola
-  await page.getByRole('button', { name: 'Add Activity' }).click();
-  r = riga(page, 2);
-  await r.getByLabel('Start').fill('800');
-  await r.getByLabel('Start').press('Tab');
-  await expect.poll(() => inizi(page)).toEqual(['08:00', '16:30', '19:00']);
-  r = riga(page, 0);
-  await r.getByLabel('Activity').selectOption('Load-in');
-  await r.getByLabel('Responsible').fill('Service tecnico');
-
-  // sovrapposizione nello stesso spazio
-  await page.getByRole('button', { name: 'Add Activity' }).click();
-  r = riga(page, 3);
-  await r.getByLabel('Start').fill('1700');
-  await r.getByLabel('Start').press('Tab');
-  r = riga(page, 2);
-  await expect(r.getByLabel('Start')).toHaveValue('17:00');
-  await r.getByLabel('End').fill('1745');
-  await r.getByLabel('Activity').selectOption('Line Check');
-  await r.getByLabel('Location').selectOption({ label: 'Officine Cantelmo' });
-  await expect(page.locator('.srow.conflitto')).toHaveCount(2);
-  await expect(page.locator('.sched-avvisi')).toContainText('Soundcheck 16:30 e Line Check 17:00 si sovrappongono (stesso spazio)');
-  // spazio nuovo direttamente dalla riga: la sovrapposizione sparisce
-  await r.getByLabel('Location').selectOption('__nuovo');
-  await page.getByLabel('Nome del nuovo spazio').fill('Second Stage');
-  await page.getByLabel('Nome del nuovo spazio').press('Enter');
-  await expect(page.getByText('Spazio "Second Stage" aggiunto alla struttura')).toBeVisible();
-  await expect(page.locator('.srow.conflitto')).toHaveCount(0);
-  await expect(riga(page, 2).getByLabel('Location')).toHaveValue(/^spa_/);
-  await salvato(page);
-
-  // duplica: parte dalla fine dell'originale e ne conserva la durata
-  await riga(page, 1).getByRole('button', { name: 'Duplica' }).click();
-  await expect.poll(() => inizi(page)).toEqual(['08:00', '16:30', '17:00', '18:30', '19:00']);
-  r = riga(page, 3);
-  await expect(r.getByLabel('End')).toHaveValue('20:30');
-  await expect(r.getByLabel('Activity')).toHaveValue('Soundcheck');
-  await r.getByRole('button', { name: 'Togli attività' }).click();
-  await r.getByRole('button', { name: 'Conferma: Togli attività' }).click();
-  await expect(page.locator('.sched .srow[data-id]')).toHaveCount(4);
-
-  // Invio sull'ultima riga aggiunge un'attività; una riga vuota viene segnalata
-  await riga(page, 3).getByLabel('Responsible').fill('Maria Mazzotta');
-  await riga(page, 3).getByLabel('Responsible').press('Enter');
-  await expect(page.locator('.sched .srow[data-id]')).toHaveCount(5);
-  await expect(page.locator('.sched-avvisi')).toContainText('un\'attività non ha il tipo');
-  await riga(page, 4).getByLabel('Activity').selectOption('Doors Open');
-  await riga(page, 4).getByLabel('Start').fill('2030');
-  await riga(page, 4).getByLabel('Start').press('Tab');
-  await expect(page.locator('.sched-avvisi')).toBeHidden();
-  await expect(page.locator('.sched-avvisi')).toBeEmpty();
-
-  await page.getByLabel('Note della giornata').fill('Carico da via Libertini, ZTL attiva dalle 20');
-  await salvato(page);
+  await apriMateriali(page, env);
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /aggiungi/i })).toHaveCount(0);
+  await expect(page.locator('.sez')).toHaveCount(2);                                   // una location già pronta + "nuova location"
+  await expect(page.locator('.griglia tbody tr')).toHaveCount(5);
+  // nome della location e prime righe, solo tastiera
+  await page.getByLabel('Location name').first().fill('MAIN STAGE');
+  await page.getByLabel('Location · Item · riga 1').click();
+  await page.keyboard.type('Microphone Stands'); await page.keyboard.press('Tab');
+  await page.keyboard.type('12'); await page.keyboard.press('Tab');
+  await page.keyboard.type('pcs'); await page.keyboard.press('Tab');
+  await page.keyboard.type('Boom'); await page.keyboard.press('Enter');
+  // blocco da Excel (3 righe x 4 colonne) dalla riga 2
+  await incolla(page, 'Location · Item · riga 2', 'XLR Cables\t20\tpcs\t10 m\nDI Box\t4\tpcs\tActive\nPower Strips\t6\tpcs\t');
+  expect(await page.getByLabel('Location · Notes · riga 3').inputValue()).toBe('Active');
+  // la tabella cresce da sola: sempre una riga libera in fondo
+  await expect(page.locator('.griglia tbody tr')).toHaveCount(5);
+  await incolla(page, 'Location · Item · riga 5', 'Cavo 1\t1\tpcs\t\nCavo 2\t1\tpcs\t');
+  await expect(page.locator('.griglia tbody tr')).toHaveCount(7);
+  // nuova location scrivendo il nome
+  await page.getByLabel('New location name').fill('FOH');
+  await page.getByLabel('New location name').press('Enter');
+  await expect(page.locator('.sez')).toHaveCount(3);
+  await expect(page.getByLabel('FOH · Item · riga 1')).toBeFocused();
+  await page.keyboard.type('Mixing Console'); await page.keyboard.press('Tab'); await page.keyboard.type('1'); await page.keyboard.press('Tab');
+  await page.keyboard.type('pcs'); await page.keyboard.press('Tab'); await page.keyboard.type('Yamaha DM7');
+  // duplico la location FOH
+  await page.locator('.sez', { has: page.getByLabel('Location name').filter({ hasText: '' }) }).first();
+  await page.locator('[data-sez]').nth(1).getByRole('button', { name: 'Duplicate' }).click();
+  await expect(page.locator('.sez')).toHaveCount(4);
+  await expect(page.getByLabel('Location name').nth(2)).toHaveValue('FOH (copy)');
+  await expect(page.getByLabel('FOH (copy) · Item · riga 1')).toHaveValue('Mixing Console');
   await noHorizontalScroll(page);
-  await page.screenshot({ path: `test-results/programma-${info.project.name}.png`, fullPage: true });
-
-  // nel database
-  const db = env.getSS(env.state.props.DB_ID);
-  const [head, ...righe] = db.getSheetByName('attivita').rows();
-  const vive = righe.map(x => Object.fromEntries(head.map((k, i) => [k, x[i]]))).filter(x => x.eliminato !== 'TRUE');
-  expect(vive.map(x => [x.ora_inizio, x.tipo]).sort()).toEqual([['08:00', 'Load-in'], ['16:30', 'Soundcheck'], ['17:00', 'Line Check'], ['19:00', 'Custom'], ['20:30', 'Doors Open']]);
-  expect(vive.find(x => x.tipo === 'Custom').attivita).toBe('Cena presso Anima e Cuore');
-  expect(db.getSheetByName('location').rows().filter(x => x[2] === 'Second Stage').length).toBe(1);
-
-  // ricarico: tutto è ancora lì, nello stesso ordine
+  await page.screenshot({ path: `test-results/materiali-foglio-${info.project.name}.png`, fullPage: true });
+  await salvato(page);
   await page.reload();
-  await expect.poll(() => inizi(page)).toEqual(['08:00', '16:30', '17:00', '19:00', '20:30']);
-  await expect(riga(page, 3).getByLabel('Nome attività personalizzata')).toHaveValue('Cena presso Anima e Cuore');
-  await expect(page.getByLabel('Note della giornata')).toHaveValue('Carico da via Libertini, ZTL attiva dalle 20');
-  await page.locator('.prod-nav').getByRole('link', { name: /Panoramica/ }).click();
-  await expect(page.locator('.tile', { hasText: 'Programma' })).toContainText('5 attività · 1/1 giornata');
-});
-
-test('programma: documento sul sito, PDF scaricato con i dati veri, lingua, stampa solo del documento', async ({ page }, info) => {
-  const env = await setup(page);
-  const adm = tokenFor(env, ADMIN);
-  const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo === 'Cantelmo: Maria Mazzotta').id;
-  const p = apiCall(env, adm, 'produzione.crea', { evento_id: evId }).data;
-  const g = p.giornate[0].id, s = p.spazi[0].id;
-  const r = apiCall(env, adm, 'produzione.salva', { id: p.id, ops: [
-    { tipo: 'attivita', azione: 'crea', id: 'att_docpdf0000001', campi: { giornata_id: g, ora_inizio: '16:45', ora_fine: '18:30', tipo: 'Soundcheck', spazio_id: s, responsabile: 'Bill Frisell Trio' } },
-    { tipo: 'attivita', azione: 'crea', id: 'att_docpdf0000002', campi: { giornata_id: g, ora_inizio: '19:30', tipo: 'Doors Open', responsabile: 'Pubblico', note: 'Biglietteria → ingresso principale' } },
-    { tipo: 'attivita', azione: 'crea', id: 'att_docpdf0000003', campi: { giornata_id: g, ora_inizio: '08:00', tipo: 'Custom', attivita: 'Load in crew service', responsabile: 'Service tecnico' } },
-    { tipo: 'giornata', azione: 'modifica', id: g, campi: { note: 'Cena alle 19 da Anima e Cuore' } },
-    { tipo: 'persona', azione: 'crea', id: 'per_docpdf0000001', campi: { nome: 'Cesare Liaci', azienda: 'Coolclub', telefono: '340 000 0000' } },
-    { tipo: 'squadra', azione: 'crea', id: 'sq_docpdf00000001', campi: { persona_id: 'per_docpdf0000001', ruolo: 'Referente produzione' } }] });
-  expect(r.ok).toBe(true);
-
-  await login(page, env);
-  await page.goto(`/#/p/${p.id}/programma`);
-  await page.getByRole('tab', { name: 'Documento e PDF' }).click();
+  await expect(page.getByLabel('FOH · Item · riga 1')).toHaveValue('Mixing Console');
+  const j = righeDoc(env, 'materiali');
+  expect(j.sezioni.map(s => [s.nome, s.righe.length])).toEqual([['MAIN STAGE', 6], ['FOH', 1], ['FOH (copy)', 1]]);
+  // documento
+  await page.getByRole('button', { name: 'Generate list' }).click();
   const doc = page.locator('article.doc');
-  await expect(doc.getByRole('heading', { name: 'Piano di produzione' })).toBeVisible();
-  await expect(doc.locator('tbody tr').first()).toContainText('08:00');
-  await expect(doc.locator('table.prog tbody tr').nth(1)).toContainText('16:45 – 18:30');
-  await expect(doc).toContainText('Cena alle 19 da Anima e Cuore');
-  await expect(doc.locator('table.cont')).toContainText('Cesare Liaci (Coolclub)');
-  await noHorizontalScroll(page);
-  await page.screenshot({ path: `test-results/documento-${info.project.name}.png`, fullPage: true });
-
-  await page.getByLabel('Lingua del documento').selectOption('en');
-  await expect(doc.getByRole('heading', { name: 'Production Schedule' })).toBeVisible();
-  await expect(doc.locator('table.prog th').nth(3)).toHaveText('Responsible');
-
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Scarica PDF' }).click()]);
-  expect(dl.suggestedFilename()).toBe(`Production Schedule - Cantelmo Maria Mazzotta - ${isoDay(2)}.pdf`);
+  await expect(doc.getByRole('heading', { name: 'Material List' })).toBeVisible();
+  await expect(doc.getByRole('heading', { name: 'MAIN STAGE' })).toBeVisible();
+  await expect(doc.locator('table').first()).toContainText('XLR Cables');
+  await expect(doc.locator('table').first().locator('tbody tr').first()).toContainText('12');
+  await page.screenshot({ path: `test-results/materiali-documento-${info.project.name}.png`, fullPage: true });
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download PDF' }).click()]);
+  expect(dl.suggestedFilename()).toBe(`Material List - Cantelmo Maria Mazzotta - ${isoDay(2)}.pdf`);
   const fs = await import('node:fs');
-  fs.copyFileSync(await dl.path(), `test-results/programma-${info.project.name}.pdf`);
+  fs.copyFileSync(await dl.path(), `test-results/material-list-${info.project.name}.pdf`);
   const pdf = fs.readFileSync(await dl.path()).toString('latin1');
-  expect(pdf.startsWith('%PDF-')).toBe(true);
-  for (const t of ['Production Schedule', 'Soundcheck', '16:45', 'Bill Frisell Trio', 'Load in crew service', 'Cesare Liaci \\(Coolclub\\)', 'Officine Cantelmo, Lecce)', 'Cena alle 19 da Anima e Cuore', 'Biglietteria -> ingresso principale']) {
-    expect(pdf, t).toContain(t);
-  }
-
-  // senza contatti
-  await page.getByLabel('Includi i contatti della squadra').uncheck();
-  await expect(doc.locator('table.cont')).toHaveCount(0);
-
-  // in stampa si vede solo il documento
-  await page.emulateMedia({ media: 'print' });
-  await expect(doc).toBeVisible();
-  await expect(page.locator('.prod-nav')).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Scarica PDF' })).toBeHidden();
-  await page.emulateMedia({ media: 'screen' });
+  for (const t of ['Material List', 'MAIN STAGE', 'Microphone Stands', 'Yamaha DM7', 'FOH \\(copy\\)']) expect(pdf, t).toContain(t);
+  await page.getByRole('button', { name: 'Copy Text' }).click();
+  await expect(page.locator('#toast')).toHaveText(/Testo copiato|Copia non riuscita/);
 });
 
-test('programma su più giornate: ogni giornata ha le sue attività; togliere una giornata avvisa e toglie le sue attività', async ({ page }) => {
-  const env = await setup(page);
-  await openEvent(page, env, 'Convegno Museo Castromediano');
-  await page.getByRole('button', { name: 'Crea scheda di produzione' }).click();
-  await page.locator('.prod-nav').getByRole('link', { name: /Programma/ }).click();
-  await expect(page.locator('.day-tab')).toHaveCount(3);
-  await page.getByRole('button', { name: 'Add Activity' }).click();
-  await riga(page, 0).getByLabel('Activity').selectOption('Setup');
-  await page.locator('.day-tab').nth(1).click();
-  await expect(page.getByText('Nessuna attività in questa giornata.')).toBeVisible();
-  await page.getByRole('button', { name: 'Add Activity' }).click();
-  await riga(page, 0).getByLabel('Activity').selectOption('Meeting');
-  await page.getByRole('button', { name: 'Add Activity' }).click();
-  await riga(page, 1).getByLabel('Activity').selectOption('Lunch');
-  await expect(page.locator('.day-tab').nth(0).locator('.count')).toHaveText('1');
-  await expect(page.locator('.day-tab').nth(1).locator('.count')).toHaveText('2');
-  await salvato(page);
-
-  await page.locator('.prod-nav').getByRole('link', { name: /Struttura/ }).click();
-  const btn = page.getByRole('button', { name: 'Togli la giornata del ' + isoDay(6) });
-  await btn.click();
-  await expect(page.getByRole('button', { name: 'Conferma: Togli la giornata del ' + isoDay(6) })).toHaveText('Togli con 2 attività?');
-  await page.getByRole('button', { name: 'Conferma: Togli la giornata del ' + isoDay(6) }).click();
-  await salvato(page);
-  await page.locator('.prod-nav').getByRole('link', { name: /Programma/ }).click();
-  await expect(page.locator('.day-tab')).toHaveCount(2);
-  const [head, ...righe] = env.getSS(env.state.props.DB_ID).getSheetByName('attivita').rows();
-  const vive = righe.map(x => Object.fromEntries(head.map((k, i) => [k, x[i]]))).filter(x => x.eliminato !== 'TRUE');
-  expect(vive.map(x => x.tipo)).toEqual(['Setup']);
-});
-
-test('programma in sola lettura: solo documento e PDF, nessun campo del programma', async ({ page }) => {
+test('Material List: la libreria suggerisce materiali già usati in altri eventi e compila unità e note; elimina location con conferma', async ({ page }) => {
   const env = await setup(page);
   const adm = tokenFor(env, ADMIN);
-  const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo === 'Cantelmo: Maria Mazzotta').id;
-  const p = apiCall(env, adm, 'produzione.crea', { evento_id: evId }).data;
-  apiCall(env, adm, 'produzione.salva', { id: p.id, ops: [{ tipo: 'attivita', azione: 'crea', id: 'att_lettura000001', campi: { giornata_id: p.giornate[0].id, ora_inizio: '21:00', tipo: 'Show Start' } }] });
-  apiCall(env, adm, 'utenti.save', { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'LETTURA' });
-  await login(page, env, 'tecnico@example.com');
-  await page.goto(`/#/p/${p.id}/programma`);
-  await expect(page.locator('article.doc')).toContainText('Show Start');
-  await expect(page.getByRole('tab', { name: 'Compila' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Add Activity' })).toHaveCount(0);
-  await expect(page.locator('.sched')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Scarica PDF' })).toBeVisible();
+  const lista = apiCall(env, adm, 'eventi.list', {}).data;
+  const a = apiCall(env, adm, 'produzione.assicura', { evento_id: lista.find(e => e.titolo.startsWith('Convegno')).id }).data;
+  apiCall(env, adm, 'documento.salva', { produzione_id: a.id, tipo: 'materiali', versione: '0', dati: { sezioni: [{ id: 's1', nome: 'FOH', righe: [{ id: 'm1', voce: 'Mixing Console', qta: '1', unita: 'pcs', note: 'Yamaha DM7' }] }] } });
+  await apriMateriali(page, env);
+  await page.getByLabel('Location · Item · riga 1').click();
+  await page.keyboard.type('mixi');
+  await expect(page.getByRole('option', { name: /Mixing Console/ })).toBeVisible();
+  await page.keyboard.press('Enter');
+  expect(await page.getByLabel('Location · Unit · riga 1').inputValue()).toBe('pcs');
+  expect(await page.getByLabel('Location · Notes · riga 1').inputValue()).toBe('Yamaha DM7');
+  expect(await page.getByLabel('Location · Quantity · riga 1').inputValue()).toBe('1');
+  // testo libero resta libero: non viene sostituito dal suggerimento
+  await page.getByLabel('Location · Item · riga 2').click();
+  await page.keyboard.type('Mixer da campo');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Tab');
+  expect(await page.getByLabel('Location · Item · riga 2').inputValue()).toBe('Mixer da campo');
+  await page.getByLabel('Location name').first().fill('STAGE');
+  await salvato(page);
+  await page.getByRole('button', { name: /Delete location/ }).first().click();
+  await expect(page.getByRole('button', { name: 'Confirm delete' })).toBeVisible();
+  await expect(page.locator('[data-sez]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Confirm delete' }).click();
+  await expect(page.getByLabel('Location name').first()).toHaveValue('');              // resta sempre un foglio pronto
+  await salvato(page);
+  expect(righeDoc(env, 'materiali').sezioni).toHaveLength(0);
+});
+
+test('tablet: i fogli stanno nello schermo in verticale e in orizzontale, azioni di riga a portata di dito', async ({ page }, info) => {
+  const env = await setup(page);
+  await apriPlan(page, env);
+  for (const [w, h] of [[820, 1180], [1180, 820]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await noHorizontalScroll(page);
+    await expect(page.getByRole('button', { name: 'Generate PdP' })).toBeVisible();
+    await page.screenshot({ path: `test-results/tablet-plan-${w}-${info.project.name}.png` });
+  }
+  await page.getByRole('link', { name: 'Material List' }).click();
+  await expect(page.getByRole('heading', { name: 'Material List' })).toBeVisible();
+  await noHorizontalScroll(page);
+  await page.screenshot({ path: `test-results/tablet-materiali-${info.project.name}.png` });
 });

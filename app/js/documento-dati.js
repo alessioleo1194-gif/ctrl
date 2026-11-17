@@ -1,80 +1,174 @@
-import Programma from './programma.js';
+import { minutiInizio } from './orari.js';
 
 /**
- * Contenuto del Production Schedule, uguale per la vista sul sito e per il PDF.
- * Funzione pura: dati della scheda + opzioni → testo del documento.
+ * Contenuto dei documenti (Production Plan, Material List), uguale per anteprima, PDF e testo copiato.
+ * Funzioni pure: dati salvati + dati dell'evento → struttura del documento.
  */
 export const TESTI = {
-  it: {
-    titolo: 'Piano di produzione', evento: 'Evento', eventi: 'Eventi', quando: 'Data e luogo', programma: 'Cronoprogramma',
-    colonne: ['Orario', 'Attività', 'Location', 'Responsabile', 'Note'], noteGiorno: 'Note della giornata',
-    contatti: 'Contatti', colContatti: ['Ruolo', 'Nome', 'Contatto'], aggiornato: 'Aggiornato il', pagina: 'Pagina', di: 'di',
-    vuoto: 'Nessuna attività in programma.', locale: 'it-IT'
-  },
   en: {
-    titolo: 'Production Schedule', evento: 'Event', eventi: 'Events', quando: 'Date and venue', programma: 'Schedule',
-    colonne: ['Time', 'Activity', 'Location', 'Responsible', 'Notes'], noteGiorno: 'Day notes',
-    contatti: 'Contacts', colContatti: ['Role', 'Name', 'Contact'], aggiornato: 'Updated', pagina: 'Page', di: 'of',
-    vuoto: 'No activities scheduled.', locale: 'en-GB'
+    plan: 'Production Plan', materiali: 'Material List', evento: 'Event', data: 'Date', venue: 'Location / Venue', indirizzo: 'Address',
+    crew: 'Technical Crew', colCrew: ['Name', 'Role', 'Phone', 'Email'], schedule: 'Production Schedule',
+    colSchedule: ['Time', 'Activity', 'Location', 'Details / Notes'], colMateriali: ['Item', 'Qty', 'Unit', 'Notes'],
+    aggiornato: 'Updated', pagina: 'Page', di: 'of', giorno: 'Day', vuoto: 'Nothing scheduled.', vuotoM: 'No items.', locale: 'en-GB'
+  },
+  it: {
+    plan: 'Piano di produzione', materiali: 'Lista materiale', evento: 'Evento', data: 'Data', venue: 'Location / Venue', indirizzo: 'Indirizzo',
+    crew: 'Crew tecnica', colCrew: ['Nome', 'Ruolo', 'Telefono', 'Email'], schedule: 'Cronoprogramma',
+    colSchedule: ['Orario', 'Attività', 'Location', 'Dettagli / Note'], colMateriali: ['Voce', 'Q.tà', 'Unità', 'Note'],
+    aggiornato: 'Aggiornato il', pagina: 'Pagina', di: 'di', giorno: 'Giorno', vuoto: 'Nessuna attività in programma.', vuotoM: 'Nessuna voce.', locale: 'it-IT'
   }
 };
 
-function data(iso, locale, opts) {
+const SEZIONE_INIZIALE = 'Pre Show';
+
+function dataLunga(iso, locale, opts) {
   return new Date(iso + 'T12:00:00Z').toLocaleDateString(locale, { timeZone: 'UTC', ...opts });
 }
 
-function intervalloDate(giornate, locale) {
-  if (!giornate.length) return '';
-  const a = giornate[0].data, b = giornate[giornate.length - 1].data;
-  const lungo = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
-  if (a === b) return data(a, locale, lungo);
-  return data(a, locale, { day: 'numeric', month: 'long' }) + ' – ' + data(b, locale, { day: 'numeric', month: 'long', year: 'numeric' });
+export function intervalloDate(eventi, locale) {
+  const date = eventi.flatMap(e => [e.data, e.data_fine || e.data]).filter(Boolean).sort();
+  if (!date.length) return '';
+  const a = date[0], b = date[date.length - 1];
+  if (a === b) return dataLunga(a, locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return dataLunga(a, locale, { day: 'numeric', month: 'long' }) + ' – ' + dataLunga(b, locale, { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-/**
- * opzioni: { lingua: 'it'|'en', giorno: '' (tutte) | id giornata, contatti: bool, adesso: Date }
- */
-export function datiDocumento(prod, opzioni = {}) {
-  const T = TESTI[opzioni.lingua] || TESTI.it;
-  const spazi = new Map(prod.spazi.map(s => [s.id, s]));
-  const giornate = prod.giornate.filter(g => !opzioni.giorno || g.id === opzioni.giorno);
-  const venue = prod.spazi.find(s => s.tipo === 'venue') || prod.spazi[0];
-  // "Officine Cantelmo" + "Officine Cantelmo, Lecce" → "Officine Cantelmo, Lecce" (niente ripetizioni)
-  const luogo = venue ? (venue.indirizzo && venue.indirizzo.toLowerCase().startsWith(venue.nome.toLowerCase()) ? venue.indirizzo
-    : [venue.nome, venue.indirizzo].filter(Boolean).join(', '))
-    : (prod.eventi[0] && prod.eventi[0].luogo) || '';
+/** Venue = prima parte del luogo del Calendar; indirizzo = il resto. */
+export function luogoEvento(eventi) {
+  const l = (eventi.find(e => e.luogo) || {}).luogo || '';
+  const parti = l.split(',').map(s => s.trim()).filter(Boolean);
+  return { venue: parti[0] || '', indirizzo: parti.slice(1).join(', ') };
+}
 
-  const intestazione = [[T.evento, prod.nome]];
-  intestazione.push([T.quando, [intervalloDate(giornate, T.locale), luogo].filter(Boolean).join(' · ')]);
-  if (prod.eventi.length > 1) intestazione.push([T.eventi, prod.eventi.map(e => e.titolo).join(' · ')]);
+/** Sezione di ogni riga: quella scritta, altrimenti quella della riga sopra ("Pre Show" all'inizio). */
+export function sezioniEffettive(righe) {
+  let cur = SEZIONE_INIZIALE;
+  return righe.map(r => { if ((r.sez || '').trim()) cur = r.sez.trim(); return cur; });
+}
 
-  const giorni = giornate.map(g => {
-    const righe = Programma.ordina(prod.attivita.filter(a => a.giornata_id === g.id)).map(a => [
-      a.ora_inizio ? (a.ora_fine ? a.ora_inizio + ' – ' + a.ora_fine : a.ora_inizio) : '',
-      Programma.nome(a),
-      (spazi.get(a.spazio_id) || {}).nome || '',
-      a.responsabile || '',
-      a.note || ''
-    ]);
-    const titolo = data(g.data, T.locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    return { id: g.id, titolo: titolo.charAt(0).toUpperCase() + titolo.slice(1) + (g.etichetta ? ' · ' + g.etichetta : ''), righe, note: g.note || '' };
+export const rigaUsata = (r) => !!((r.att || '').trim() || (r.loc || '').trim() || (r.note || '').trim());
+
+/** Righe usate, ordinate per orario dentro ogni sezione; le sezioni nell'ordine in cui compaiono nel foglio. */
+export function sezioniOrdinate(righe) {
+  const eff = sezioniEffettive(righe);
+  const ordine = [], gruppi = new Map();
+  righe.forEach((r, i) => {
+    if (!rigaUsata(r)) return;
+    const s = eff[i];
+    if (!gruppi.has(s)) { gruppi.set(s, []); ordine.push(s); }
+    gruppi.get(s).push({ r, i });
   });
-
-  const contatti = opzioni.contatti ? prod.squadra.filter(m => m.persona).map(m => {
-    const p = m.persona;
-    return [m.ruolo || p.ruolo || '', p.nome + (p.azienda ? ' (' + p.azienda + ')' : ''), [p.telefono, p.email].filter(Boolean).join(' · ')];
-  }) : [];
-
-  const adesso = opzioni.adesso || new Date();
-  const aggiornato = T.aggiornato + ' ' + adesso.toLocaleString(T.locale, { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  return { T, titolo: T.titolo, intestazione, giorni, contatti, aggiornato };
+  return ordine.map(nome => ({
+    nome,
+    righe: gruppi.get(nome).sort((a, b) => {
+      const x = minutiInizio(a.r.ora), y = minutiInizio(b.r.ora);
+      if (x === null && y === null) return a.i - b.i;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return x - y || a.i - b.i;
+    }).map(x => x.r)
+  }));
 }
 
-/** Nome del file: "Production Schedule - Bill Frisell Trio - 2026-11-08.pdf" */
-export function nomeFile(prod, doc, giornate) {
+/** Ordina le righe del foglio per orario, tenendo ferma la sezione di ognuna (la scrive esplicitamente). */
+export function ordinaFoglio(righe) {
+  const eff = sezioniEffettive(righe);
+  const ordine = [];
+  eff.forEach(s => { if (!ordine.includes(s)) ordine.push(s); });
+  const con = righe.map((r, i) => ({ r: { ...r, sez: eff[i] }, i, s: eff[i] }));
+  con.sort((a, b) => {
+    const sa = ordine.indexOf(a.s), sb = ordine.indexOf(b.s);
+    if (sa !== sb) return sa - sb;
+    const x = minutiInizio(a.r.ora), y = minutiInizio(b.r.ora);
+    if (x === null && y === null) return a.i - b.i;
+    if (x === null) return 1;
+    if (y === null) return -1;
+    return x - y || a.i - b.i;
+  });
+  // la sezione si scrive solo sulla prima riga di ogni gruppo (le altre la ereditano)
+  let prec = null;
+  return con.map(({ r, s }) => { const nuova = { ...r, sez: s === prec ? '' : s }; prec = s; return nuova; });
+}
+
+function adesso(opz, T) {
+  const d = opz.adesso || new Date();
+  return T.aggiornato + ' ' + d.toLocaleString(T.locale, { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function intestazione(prod, eventi, T) {
+  const { venue, indirizzo } = luogoEvento(eventi);
+  const out = [[T.evento, prod.nome], [T.data, intervalloDate(eventi, T.locale)], [T.venue, venue]];
+  if (indirizzo) out.push([T.indirizzo, indirizzo]);
+  return out.filter(([, v]) => v);
+}
+
+export function costruisciPlan(prod, eventi, dati, opz = {}) {
+  const T = TESTI[dati.lingua] || TESTI.en;
+  const crew = dati.crew.filter(c => c.nome || c.ruolo || c.telefono || c.email).map(c => [c.nome, c.ruolo, c.telefono, c.email]);
+  let giorni = dati.giorni.map(g => ({ g, sezioni: sezioniOrdinate(g.righe) }));
+  const conAttivita = giorni.filter(x => x.sezioni.length);
+  giorni = conAttivita.length ? conAttivita : giorni.slice(0, 1);
+  const multi = dati.giorni.length > 1;
+  return {
+    tipo: 'plan', T, titolo: T.plan, intestazione: intestazione(prod, eventi, T), nomeEvento: prod.nome,
+    crewTitolo: T.crew, colCrew: T.colCrew, crew,
+    scheduleTitolo: T.schedule, colSchedule: T.colSchedule,
+    giorni: giorni.map(({ g, sezioni }) => ({
+      titolo: multi && g.data ? (dataLunga(g.data, T.locale, { weekday: 'long', day: 'numeric', month: 'long' }).replace(/^./, c => c.toUpperCase())) : '',
+      sezioni: sezioni.map(s => ({ nome: s.nome, righe: s.righe.map(r => [r.ora, r.att, r.loc, r.note]) }))
+    })),
+    aggiornato: adesso(opz, T), data: (dati.giorni[0] || {}).data || ''
+  };
+}
+
+export function costruisciMateriali(prod, eventi, dati, opz = {}) {
+  const T = TESTI[opz.lingua] || TESTI.en;
+  const sezioni = dati.sezioni.map(s => ({
+    nome: s.nome || '—',
+    righe: s.righe.filter(r => r.voce || r.qta || r.unita || r.note).map(r => [r.voce, r.qta, r.unita, r.note])
+  })).filter(s => s.righe.length);
+  return {
+    tipo: 'materiali', T, titolo: T.materiali, intestazione: intestazione(prod, eventi, T), nomeEvento: prod.nome,
+    colonne: T.colMateriali, sezioni, aggiornato: adesso(opz, T),
+    data: eventi.map(e => e.data).filter(Boolean).sort()[0] || ''
+  };
+}
+
+/** Testo semplice da incollare in un messaggio. */
+export function testoDocumento(d) {
+  const L = [d.titolo.toUpperCase()];
+  d.intestazione.forEach(([k, v]) => L.push(`${k}: ${v}`));
+  L.push('');
+  if (d.tipo === 'plan') {
+    if (d.crew.length) {
+      L.push(d.crewTitolo.toUpperCase());
+      d.crew.forEach(r => L.push(r.filter(Boolean).join(' · ')));
+      L.push('');
+    }
+    L.push(d.scheduleTitolo.toUpperCase());
+    d.giorni.forEach(g => {
+      if (g.titolo) L.push('', g.titolo);
+      if (!g.sezioni.length) L.push(d.T.vuoto);
+      g.sezioni.forEach(s => {
+        L.push('', '— ' + s.nome.toUpperCase());
+        s.righe.forEach(([ora, att, loc, note]) => L.push([ora, att, loc ? '(' + loc + ')' : '', note ? '– ' + note : ''].filter(Boolean).join(' ')));
+      });
+    });
+  } else {
+    if (!d.sezioni.length) L.push(d.T.vuotoM);
+    d.sezioni.forEach(s => {
+      L.push(s.nome.toUpperCase());
+      s.righe.forEach(([voce, qta, unita, note]) => { const q = [qta, unita].filter(Boolean).join(' '); L.push('- ' + (q ? q + '  ' : '') + voce + (note ? ' (' + note + ')' : '')); });
+      L.push('');
+    });
+  }
+  return L.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+}
+
+/** Nome del file: "Production Plan - Bill Frisell Trio - 2026-11-08.pdf" */
+export function nomeFile(d) {
   const pulito = (s) => String(s).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
-  const d = giornate.length ? giornate[0].data : '';
-  return [pulito(doc.titolo), pulito(prod.nome), d].filter(Boolean).join(' - ') + '.pdf';
+  return [pulito(d.titolo), pulito(d.nomeEvento), d.data].filter(Boolean).join(' - ') + '.pdf';
 }
 
 /**
@@ -82,14 +176,14 @@ export function nomeFile(prod, doc, giornate) {
  * frecce e simili con un equivalente, il resto con "?" (così il PDF non mostra caratteri rotti).
  */
 const EXTRA = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
-const SOSTITUTI = { '→': '->', '←': '<-', '↔': '<->', '≥': '>=', '≤': '<=', '≠': '!=', '×': 'x', ' ': ' ', '\t': ' ', ' ': ' ', ' ': ' ' };
+const SOSTITUTI = { '→': '->', '←': '<-', '↔': '<->', '≥': '>=', '≤': '<=', '≠': '!=', '×': 'x', '\t': ' ', ' ': ' ', ' ': ' ' };
 export function testoPdf(s) {
   let out = '';
   for (const ch of String(s == null ? '' : s).normalize('NFC')) {
     const c = ch.codePointAt(0);
     if (ch === '\n' || (c >= 0x20 && c <= 0x7e) || (c >= 0xa1 && c <= 0xff) || EXTRA.includes(ch)) out += ch;
     else if (ch in SOSTITUTI) out += SOSTITUTI[ch];
-    else if (c >= 0xfe00 && c <= 0xfe0f) continue; // selettori di variante delle emoji
+    else if (c >= 0xfe00 && c <= 0xfe0f) continue;
     else out += '?';
   }
   return out;
