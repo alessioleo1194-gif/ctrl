@@ -8,13 +8,13 @@ export const TESTI = {
   en: {
     plan: 'Production Plan', materiali: 'Material List', evento: 'Event', data: 'Date', venue: 'Location / Venue', indirizzo: 'Address',
     crew: 'Technical Crew', colCrew: ['Name', 'Role', 'Phone', 'Email'], schedule: 'Production Schedule',
-    colSchedule: ['Time', 'Activity', 'Location', 'Details / Notes'], colMateriali: ['Item', 'Qty', 'Unit', 'Notes'],
+    colSchedule: ['Time', 'Activity', 'Location', 'Details / Notes'], colMateriali: ['Item', 'Qty', 'Notes'],
     aggiornato: 'Updated', pagina: 'Page', di: 'of', giorno: 'Day', vuoto: 'Nothing scheduled.', vuotoM: 'No items.', locale: 'en-GB'
   },
   it: {
     plan: 'Piano di produzione', materiali: 'Lista materiale', evento: 'Evento', data: 'Data', venue: 'Location / Venue', indirizzo: 'Indirizzo',
     crew: 'Crew tecnica', colCrew: ['Nome', 'Ruolo', 'Telefono', 'Email'], schedule: 'Cronoprogramma',
-    colSchedule: ['Orario', 'Attività', 'Location', 'Dettagli / Note'], colMateriali: ['Voce', 'Q.tà', 'Unità', 'Note'],
+    colSchedule: ['Orario', 'Attività', 'Location', 'Dettagli / Note'], colMateriali: ['Voce', 'Q.tà', 'Note'],
     aggiornato: 'Aggiornato il', pagina: 'Pagina', di: 'di', giorno: 'Giorno', vuoto: 'Nessuna attività in programma.', vuotoM: 'Nessuna voce.', locale: 'it-IT'
   }
 };
@@ -125,7 +125,7 @@ export function costruisciMateriali(prod, eventi, dati, opz = {}) {
   const T = TESTI[opz.lingua] || TESTI.en;
   const sezioni = dati.sezioni.map(s => ({
     nome: s.nome || '—',
-    righe: s.righe.filter(r => r.voce || r.qta || r.unita || r.note).map(r => [r.voce, r.qta, r.unita, r.note])
+    righe: s.righe.filter(r => r.voce || r.qta || r.note).map(r => [r.voce, r.qta, r.note])
   })).filter(s => s.righe.length);
   return {
     tipo: 'materiali', T, titolo: T.materiali, intestazione: intestazione(prod, eventi, T), nomeEvento: prod.nome,
@@ -158,7 +158,7 @@ export function testoDocumento(d) {
     if (!d.sezioni.length) L.push(d.T.vuotoM);
     d.sezioni.forEach(s => {
       L.push(s.nome.toUpperCase());
-      s.righe.forEach(([voce, qta, unita, note]) => { const q = [qta, unita].filter(Boolean).join(' '); L.push('- ' + (q ? q + '  ' : '') + voce + (note ? ' (' + note + ')' : '')); });
+      s.righe.forEach(([voce, qta, note]) => { L.push('- ' + (qta ? qta + '  ' : '') + voce + (note ? ' (' + note + ')' : '')); });
       L.push('');
     });
   }

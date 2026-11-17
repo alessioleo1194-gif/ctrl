@@ -1,5 +1,10 @@
 # Registro delle modifiche
 
+## 0.5.1 · Material List senza colonna Unit (17/11/2026)
+
+- Tolta la colonna **Unit** dalla Material List (foglio, PDF, Copy Text, incolla da Excel: Item · Quantity · Notes).
+- I valori Unit già salvati restano nei dati, non si vedono né si esportano. Backend invariato.
+
 ## 0.5.0 · Production Plan e Material List come fogli di lavoro (17/11/2026)
 
 Sostituisce la scheda di produzione e il programma a righe delle versioni 0.3–0.4 (mai andati in produzione).

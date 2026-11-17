@@ -4,12 +4,11 @@ import { nuovoId } from '../ids.js';
 import { costruisciMateriali } from '../documento-dati.js';
 import { apriFoglio } from './foglio.js';
 
-const UNITA_BASE = ['pcs', 'm', 'set', 'kit', 'pair'];
 
 export function renderMateriali(main, produzioneId) { return apriFoglio(main, produzioneId, 'materiali', { crea }); }
 
-const nuovaVoce = () => ({ id: nuovoId('m'), voce: '', qta: '', unita: '', note: '' });
-const voceVuota = (x) => !x.voce && !x.qta && !x.unita && !x.note;
+const nuovaVoce = () => ({ id: nuovoId('m'), voce: '', qta: '', note: '' });
+const voceVuota = (x) => !x.voce && !x.qta && !x.note;
 const copiaVoce = (x) => ({ ...x, id: nuovoId('m') });
 
 function crea(r, modifica) {
@@ -35,16 +34,15 @@ function crea(r, modifica) {
         { chiave: 'voce', titolo: 'Item', classe: 'c-voce', opzioni: (riga) => {
           const qui = unici(tutte().filter(x => x !== riga).map(x => x.voce)).map(v => ({ valore: v }));
           const nomi = new Set(qui.map(x => x.valore.toLowerCase()));
-          return qui.concat(libreria.filter(l => !nomi.has(l.voce.toLowerCase())).map(l => ({ valore: l.voce, dettaglio: [l.unita, l.note].filter(Boolean).join(' · '), extra: l })));
+          return qui.concat(libreria.filter(l => !nomi.has(l.voce.toLowerCase())).map(l => ({ valore: l.voce, dettaglio: l.note || '', extra: l })));
         } },
         { chiave: 'qta', titolo: 'Quantity', classe: 'c-qta', modo: 'decimal' },
-        { chiave: 'unita', titolo: 'Unit', classe: 'c-unita', opzioni: (riga) => unici([...UNITA_BASE, ...tutte().filter(x => x !== riga).map(x => x.unita), ...libreria.map(l => l.unita)]) },
         { chiave: 'note', titolo: 'Notes', classe: 'c-note' }
       ],
       onScelta: (riga, chiave, o) => {
         if (chiave !== 'voce') return;
         const ex = o.extra || tutte().find(x => x !== riga && x.voce.toLowerCase() === o.valore.toLowerCase());
-        if (ex) { if (!riga.unita) riga.unita = ex.unita || ''; if (!riga.note) riga.note = ex.note || ''; }
+        if (ex) { if (!riga.note) riga.note = ex.note || ''; }
         if (!riga.qta) riga.qta = '1';
       },
       onModifica: () => notifica()

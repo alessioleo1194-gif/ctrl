@@ -102,7 +102,7 @@ export async function creaPdf(d, nome) {
       titolo(s.nome);
       pdf.autoTable({
         ...stile, startY: y + 1, head: [d.colonne.map(testoPdf)], body: s.righe.map(r => r.map(testoPdf)),
-        columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 16, halign: 'right' }, 2: { cellWidth: 20 } }
+        columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 20, halign: 'right' } }
       });
       y = pdf.lastAutoTable.finalY + 7;
     });

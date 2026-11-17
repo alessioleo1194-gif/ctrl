@@ -527,14 +527,13 @@ test('Material List: foglio già pronto, scrivo location e voci, incollo da Exce
   await page.getByLabel('Location · Item · riga 1').click();
   await page.keyboard.type('Microphone Stands'); await page.keyboard.press('Tab');
   await page.keyboard.type('12'); await page.keyboard.press('Tab');
-  await page.keyboard.type('pcs'); await page.keyboard.press('Tab');
   await page.keyboard.type('Boom'); await page.keyboard.press('Enter');
-  // blocco da Excel (3 righe x 4 colonne) dalla riga 2
-  await incolla(page, 'Location · Item · riga 2', 'XLR Cables\t20\tpcs\t10 m\nDI Box\t4\tpcs\tActive\nPower Strips\t6\tpcs\t');
+  // blocco da Excel (3 righe x 3 colonne) dalla riga 2
+  await incolla(page, 'Location · Item · riga 2', 'XLR Cables\t20\t10 m\nDI Box\t4\tActive\nPower Strips\t6\t');
   expect(await page.getByLabel('Location · Notes · riga 3').inputValue()).toBe('Active');
   // la tabella cresce da sola: sempre una riga libera in fondo
   await expect(page.locator('.griglia tbody tr')).toHaveCount(5);
-  await incolla(page, 'Location · Item · riga 5', 'Cavo 1\t1\tpcs\t\nCavo 2\t1\tpcs\t');
+  await incolla(page, 'Location · Item · riga 5', 'Cavo 1\t1\t\nCavo 2\t1\t');
   await expect(page.locator('.griglia tbody tr')).toHaveCount(7);
   // nuova location scrivendo il nome
   await page.getByLabel('New location name').fill('FOH');
@@ -542,7 +541,7 @@ test('Material List: foglio già pronto, scrivo location e voci, incollo da Exce
   await expect(page.locator('.sez')).toHaveCount(3);
   await expect(page.getByLabel('FOH · Item · riga 1')).toBeFocused();
   await page.keyboard.type('Mixing Console'); await page.keyboard.press('Tab'); await page.keyboard.type('1'); await page.keyboard.press('Tab');
-  await page.keyboard.type('pcs'); await page.keyboard.press('Tab'); await page.keyboard.type('Yamaha DM7');
+  await page.keyboard.type('Yamaha DM7');
   // duplico la location FOH
   await page.locator('.sez', { has: page.getByLabel('Location name').filter({ hasText: '' }) }).first();
   await page.locator('[data-sez]').nth(1).getByRole('button', { name: 'Duplicate' }).click();
@@ -570,11 +569,12 @@ test('Material List: foglio già pronto, scrivo location e voci, incollo da Exce
   fs.copyFileSync(await dl.path(), `test-results/material-list-${info.project.name}.pdf`);
   const pdf = fs.readFileSync(await dl.path()).toString('latin1');
   for (const t of ['Material List', 'MAIN STAGE', 'Microphone Stands', 'Yamaha DM7', 'FOH \\(copy\\)']) expect(pdf, t).toContain(t);
+  expect(pdf).not.toContain('Unit');
   await page.getByRole('button', { name: 'Copy Text' }).click();
   await expect(page.locator('#toast')).toHaveText(/Testo copiato|Copia non riuscita/);
 });
 
-test('Material List: la libreria suggerisce materiali già usati in altri eventi e compila unità e note; elimina location con conferma', async ({ page }) => {
+test('Material List: la libreria suggerisce materiali già usati in altri eventi e compila note; elimina location con conferma', async ({ page }) => {
   const env = await setup(page);
   const adm = tokenFor(env, ADMIN);
   const lista = apiCall(env, adm, 'eventi.list', {}).data;
@@ -585,7 +585,7 @@ test('Material List: la libreria suggerisce materiali già usati in altri eventi
   await page.keyboard.type('mixi');
   await expect(page.getByRole('option', { name: /Mixing Console/ })).toBeVisible();
   await page.keyboard.press('Enter');
-  expect(await page.getByLabel('Location · Unit · riga 1').inputValue()).toBe('pcs');
+  await expect(page.getByLabel('Location · Unit · riga 1')).toHaveCount(0); // la colonna Unit non esiste più
   expect(await page.getByLabel('Location · Notes · riga 1').inputValue()).toBe('Yamaha DM7');
   expect(await page.getByLabel('Location · Quantity · riga 1').inputValue()).toBe('1');
   // testo libero resta libero: non viene sostituito dal suggerimento
