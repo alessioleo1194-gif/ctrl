@@ -13,12 +13,21 @@ const header = `/**\n * CTRL API · versione ${version}\n * FILE GENERATO da scr
 const body = files.map(f => `\n// ===== ${f} =====\n` + fs.readFileSync(path.join(src, f), 'utf8').trimEnd() + '\n').join('');
 const content = header + body;
 
+// Le regole del programma servono anche all'app: stessa sorgente, copiata come modulo ES.
+const progSrc = path.join(src, '24_Programma.js');
+const progOut = path.join(root, 'app/js/programma.js');
+const progContent = '// FILE GENERATO da scripts/build-backend.mjs a partire da backend/src/24_Programma.js: non modificarlo a mano.\n' +
+  fs.readFileSync(progSrc, 'utf8').trimEnd() + '\n\nexport default Programma;\n';
+
 if (process.argv.includes('--check')) {
   const cur = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
   if (cur !== content) { console.error('backend/dist/Codice.gs non è aggiornato: esegui npm run build'); process.exit(1); }
-  console.log('backend/dist/Codice.gs aggiornato');
+  const curProg = fs.existsSync(progOut) ? fs.readFileSync(progOut, 'utf8') : '';
+  if (curProg !== progContent) { console.error('app/js/programma.js non è aggiornato: esegui npm run build'); process.exit(1); }
+  console.log('backend/dist/Codice.gs e app/js/programma.js aggiornati');
 } else {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, content);
+  fs.writeFileSync(progOut, progContent);
   console.log('Scritto ' + path.relative(root, out) + ' (' + files.length + ' moduli, versione ' + version + ')');
 }

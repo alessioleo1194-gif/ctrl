@@ -3,13 +3,16 @@ import { h, icon, toast, loading } from '../ui.js';
 import { store, navigate, loadEvents } from '../app.js';
 import { longDate, dateRange, shortDate } from '../format.js';
 import { creaSalvataggio, nuovoId } from '../autosave.js';
+import { bloccoProgramma } from './programma.js';
 
 /**
- * Scheda di produzione (tappa 1): panoramica, struttura (giornate e spazi), persone (squadra e rubrica).
+ * Scheda di produzione: panoramica, programma (Production Schedule), struttura (giornate e spazi),
+ * persone (squadra e rubrica).
  * Tutto si salva da solo; la pagina resta la fonte di verità mentre si scrive.
  */
 const BLOCCHI = [
   { k: 'panoramica', l: 'Panoramica' },
+  { k: 'programma', l: 'Programma' },
   { k: 'struttura', l: 'Struttura' },
   { k: 'persone', l: 'Persone' }
 ];
@@ -50,6 +53,7 @@ function pagina(prod) {
   let rubrica = null;
   let corrente = 'panoramica';
   let mainEl = null;
+  const statoProgramma = {};
 
   const indicatore = h('span', { class: 'save-ind', role: 'status', 'aria-live': 'polite' }, 'Tutto salvato');
   const nav = h('nav', { class: 'prod-nav', 'aria-label': 'Blocchi della scheda' });
@@ -61,7 +65,7 @@ function pagina(prod) {
     onRisposta: (r) => {
       prod.blocchi = r.blocchi;
       prod.avvisi = r.avvisi;
-      ['giornate', 'spazi', 'squadra'].forEach(l => r[l].forEach(x => versioni.set(x.id, x.versione)));
+      ['giornate', 'spazi', 'squadra', 'attivita'].forEach(l => (r[l] || []).forEach(x => versioni.set(x.id, x.versione)));
       prod.versione = r.versione;
       (r.conflitti || []).forEach(c => toast(`${c.da} aveva modificato questo elemento poco prima: i campi che hai cambiato tu sono stati salvati sopra.`, 'err'));
       disegnaNav();
@@ -73,7 +77,9 @@ function pagina(prod) {
     saver.metti({ tipo, azione, id, campi, versione: id ? versioni.get(id) : prod.versione });
   }
 
-  [...prod.giornate, ...prod.spazi, ...prod.squadra].forEach(x => versioni.set(x.id, x.versione));
+  prod.attivita = prod.attivita || [];
+  prod.catalogo_attivita = prod.catalogo_attivita || [];
+  [...prod.giornate, ...prod.spazi, ...prod.squadra, ...prod.attivita].forEach(x => versioni.set(x.id, x.versione));
 
   // ---------- intestazione e navigazione ----------
 
@@ -126,7 +132,8 @@ function pagina(prod) {
   }
 
   function disegnaBlocco() {
-    if (corrente === 'struttura') corpo.replaceChildren(...struttura());
+    if (corrente === 'programma') corpo.replaceChildren(...bloccoProgramma({ prod, mod, salva, card, conferma, stato: statoProgramma, saver, ridisegna: disegnaBlocco }));
+    else if (corrente === 'struttura') corpo.replaceChildren(...struttura());
     else if (corrente === 'persone') corpo.replaceChildren(...persone());
     else corpo.replaceChildren(...panoramica());
   }
@@ -191,6 +198,7 @@ function pagina(prod) {
       : h('p', { class: 'help', style: { margin: 0 } }, 'Nessun avviso.');
     return [
       h('div', { class: 'tiles' },
+        tile('programma', 'Programma', `${b.programma.attivita} attività · ${b.programma.giornate}/${b.struttura.giornate} ${b.struttura.giornate === 1 ? 'giornata' : 'giornate'}`),
         tile('struttura', 'Struttura', `${b.struttura.giornate} ${b.struttura.giornate === 1 ? 'giornata' : 'giornate'} · ${b.struttura.spazi} ${b.struttura.spazi === 1 ? 'spazio' : 'spazi'}`),
         tile('persone', 'Persone', `${b.persone.squadra} in squadra`)),
       card('Avvisi', h('span', { class: 'help mono' }, String(prod.avvisi.length)), avvisi)
@@ -210,7 +218,7 @@ function pagina(prod) {
       cruscotto,
       eventiCard(),
       card('Note della produzione', null, note),
-      h('p', { class: 'help' }, 'Programma, artisti e channel list, materiale e documenti PDF arrivano nelle prossime tappe di CTRL.')
+      h('p', { class: 'help' }, 'Lista materiali, artisti e channel list arrivano nelle prossime tappe di CTRL.')
     ];
   }
 
@@ -253,7 +261,7 @@ function pagina(prod) {
     await saver.subito();
     const r = await promessa;
     Object.assign(prod, r);
-    [...prod.giornate, ...prod.spazi, ...prod.squadra].forEach(x => versioni.set(x.id, x.versione));
+    [...prod.giornate, ...prod.spazi, ...prod.squadra, ...prod.attivita].forEach(x => versioni.set(x.id, x.versione));
     mainEl = null;
     mostra(corrente, document.querySelector('main.prod'));
   }
@@ -266,9 +274,10 @@ function pagina(prod) {
       h('div', { class: 'gio-data' }, h('b', {}, longDate(g.data)),
         eventiDel(g.data).length ? h('span', { class: 'help' }, eventiDel(g.data).map(e => e.titolo).join(' · ')) : h('span', { class: 'help' }, 'Nessun evento del Calendar in questa data')),
       campo(g.etichetta, v => { g.etichetta = v; salva('giornata', 'modifica', g.id, { etichetta: v }); }, { placeholder: 'es. Montaggio, Show, Smontaggio', label: 'Etichetta del ' + g.data, max: 60, vuoto: '' }),
-      mod ? conferma(h('button', { class: 'iconbtn', 'aria-label': 'Togli la giornata del ' + g.data, title: 'Togli giornata' }, icon('x')), 'Togli?', () => {
+      mod ? conferma(h('button', { class: 'iconbtn', 'aria-label': 'Togli la giornata del ' + g.data, title: 'Togli giornata' }, icon('x')), prod.attivita.some(a => a.giornata_id === g.id) ? `Togli con ${prod.attivita.filter(a => a.giornata_id === g.id).length} attività?` : 'Togli?', () => {
         prod.giornate = prod.giornate.filter(x => x !== g);
         prod.squadra.forEach(s => { if (s.giornata_id === g.id) s.giornata_id = ''; });
+        prod.attivita = prod.attivita.filter(a => a.giornata_id !== g.id);
         salva('giornata', 'elimina', g.id);
         disegnaBlocco();
       }) : null)));
@@ -298,6 +307,7 @@ function pagina(prod) {
         conferma(h('button', { class: 'iconbtn', 'aria-label': 'Togli lo spazio ' + s.nome, title: 'Togli spazio' }, icon('x')), 'Togli?', () => {
           prod.spazi = prod.spazi.filter(x => x !== s);
           prod.squadra.forEach(m => { if (m.spazio_id === s.id) m.spazio_id = ''; });
+          prod.attivita.forEach(a => { if (a.spazio_id === s.id) a.spazio_id = ''; });
           salva('spazio', 'elimina', s.id);
           disegnaBlocco();
         })) : null)));

@@ -34,6 +34,7 @@ npm run serve        # app in locale su http://localhost:4173
 
 In produzione su https://ctrl-alessioleo.netlify.app.
 Fase 1 (fondamenta): accesso, ruoli, eventi dal Calendar e manuali, note di produzione, impostazioni, app installabile.
-Scheda di produzione (in costruzione a tappe): struttura, persone e squadra; file allegati su Drive. Prossime tappe: programma, artisti e channel list, materiale calcolato, PDF.
+Scheda di produzione (in costruzione a tappe): programma (Production Schedule) con PDF e stampa, struttura, persone e squadra; file allegati su Drive. Prossime tappe: lista materiali per location, artisti e channel list, materiale calcolato dai rider.
+Librerie dell'app copiate in `app/vendor` con versione bloccata: jsPDF 4.2.1, jspdf-autotable 5.0.9 (licenze MIT in `app/vendor/LICENSES.txt`).
 Prossime fasi: PDF completo (F3), link di condivisione (F4),
 pagina madre e festival (F5), consultazione offline (F6).

@@ -1,5 +1,29 @@
 # Registro delle modifiche
 
+## 0.4.0 · Scheda di produzione, tappa 2: programma (Production Schedule) e PDF (17/11/2026)
+
+- Nuovo blocco **Programma** nella scheda di produzione: una tabella per giornata con Start, End, Activity,
+  Location, Responsible, Details / Notes. Pulsante **Add Activity**, attività illimitate.
+- **Activity** da un menu di 22 voci in inglese (Load-in, Soundcheck, Doors Open, Load-out…) più **Custom Activity**.
+- Orari scritti in fretta (`1630`, `16.30`, `9`) diventano `16:30`, `09:00`; un orario sbagliato è segnalato e non salvato.
+- **Ordine cronologico** automatico; la giornata operativa va dalle 06:00 alle 05:59 (un load-out all'01:00 resta
+  nella giornata dello show). Le frecce ordinano solo le attività con lo stesso orario.
+- **Duplica** (riparte dalla fine dell'originale, con la stessa durata), **togli** con conferma, **Invio** per scendere
+  di riga o aggiungerne una nuova. Una nuova attività parte dalla fine della precedente.
+- **Location** dagli spazi della struttura, con «+ Nuovo spazio…» direttamente dalla riga; **Responsible** con
+  suggerimenti dalla squadra e dai nomi già usati.
+- **Avvisi**: sovrapposizioni nello stesso spazio o con lo stesso responsabile, attività senza tipo o senza orario,
+  durate oltre 12 ore. Non bloccano il salvataggio.
+- **Note della giornata.**
+- **Documento e PDF**: anteprima sul sito, PDF A4 scaricabile (italiano o inglese, una o tutte le giornate, contatti
+  della squadra facoltativi) e stampa del solo documento. Il PDF si crea nell'app con jsPDF 4.2.1 e
+  jspdf-autotable 5.0.9, copiati in `app/vendor` (versioni bloccate, nessun CDN).
+- Le regole del programma sono scritte una volta (`backend/src/24_Programma.js`) e copiate nell'app da `npm run build`.
+- Togliere una giornata toglie anche le sue attività (la conferma dice quante); togliere uno spazio lascia
+  le attività senza spazio.
+- Database: colonne aggiunte a `attivita` (`progetto_id`, `giornata_id`, `spazio_id`, `tipo`) e a `giornate` (`note`).
+  Dopo l'aggiornamento del codice va rieseguito il setup.
+
 ## 0.3.0 · Scheda di produzione, tappa 1: fondamenta (16/11/2026)
 
 Riprogettazione approvata: https://claude.ai/artifact/KA68oPNgFcFPLGdnNMJWYQ

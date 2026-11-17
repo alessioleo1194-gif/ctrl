@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.3.0
+ * CTRL API · versione 0.4.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.3.0';
+var CTRL_VERSION = '0.4.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -179,14 +179,15 @@ var Util = (function () {
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
     'descrizione', 'colore', 'progetto_id', 'cartella_id', 'stato', 'note',
     'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'versione', 'sync_il'],
+  // programma della produzione (Production Schedule). evento_id resta per compatibilità, non si usa più.
   attivita: ['id', 'evento_id', 'ora_inizio', 'ora_fine', 'attivita', 'responsabile', 'note', 'ordine',
-    'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione'],
+    'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione', 'progetto_id', 'giornata_id', 'spazio_id', 'tipo'],
   materiale: ['id', 'evento_id', 'voce', 'quantita', 'area', 'provenienza', 'fornitore', 'note', 'ordine',
     'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione'],
   canali: ['id', 'evento_id', 'numero', 'sorgente', 'microfono', 'di', 'asta', 'note', 'ordine',
@@ -201,7 +202,7 @@ var SCHEMA = {
   location: ['id', 'progetto_id', 'nome', 'indirizzo', 'note', 'versione', 'tipo', 'ordine', 'eliminato', 'creato_il',
     'aggiornato_il', 'aggiornato_da'],
   giornate: ['id', 'progetto_id', 'data', 'etichetta', 'ordine', 'eliminato', 'creato_il', 'aggiornato_il',
-    'aggiornato_da', 'versione'],
+    'aggiornato_da', 'versione', 'note'],
   // rubrica comune a tutte le produzioni
   persone: ['id', 'nome', 'ruolo', 'telefono', 'email', 'azienda', 'note', 'eliminato', 'creato_il', 'creato_da',
     'aggiornato_il', 'aggiornato_da', 'versione'],
@@ -1116,7 +1117,7 @@ var Allegati = (function () {
 
 // ===== 23_Produzioni.js =====
 /**
- * CTRL · Scheda di produzione (tappa 1: struttura e persone).
+ * CTRL · Scheda di produzione (struttura, persone, programma).
  *
  * Una produzione (tabella "progetti") raggruppa uno o più eventi del Calendar
  * (eventi.progetto_id): un concerto ha un evento, un festival ne ha molti.
@@ -1133,17 +1134,21 @@ var Produzioni = (function () {
   var MAX_OPS = 200;
   var MAX_GIORNATE_AUTO = 31;
   var TIPI_SPAZIO = ['palco', 'sala', 'venue', 'magazzino', 'altro'];
-  var PREFISSI = { giornata: 'gio', spazio: 'spa', squadra: 'sq', persona: 'per' };
-  var TABELLE = { giornata: 'giornate', spazio: 'location', squadra: 'squadra', persona: 'persone' };
+  var MAX_ATTIVITA = 400; // per produzione
+  var PREFISSI = { giornata: 'gio', spazio: 'spa', squadra: 'sq', persona: 'per', attivita: 'att' };
+  var TABELLE = { giornata: 'giornate', spazio: 'location', squadra: 'squadra', persona: 'persone', attivita: 'attivita' };
+  var FIGLI = ['giornata', 'spazio', 'squadra', 'attivita'];
 
   // Campi modificabili e loro lunghezza massima
   var CAMPI = {
     produzione: { nome: 120, note: 5000 },
-    giornata: { data: 10, etichetta: 60, ordine: 6 },
+    giornata: { data: 10, etichetta: 60, ordine: 6, note: 2000 },
     spazio: { nome: 80, tipo: 20, indirizzo: 200, note: 1000, ordine: 6 },
     squadra: { persona_id: 40, ruolo: 80, giornata_id: 40, spazio_id: 40, note: 500, ordine: 6 },
-    persona: { nome: 80, ruolo: 80, telefono: 30, email: 120, azienda: 80, note: 500 }
+    persona: { nome: 80, ruolo: 80, telefono: 30, email: 120, azienda: 80, note: 500 },
+    attivita: { giornata_id: 40, ora_inizio: 5, ora_fine: 5, tipo: 20, attivita: 80, spazio_id: 40, responsabile: 120, note: 2000, ordine: 6 }
   };
+  var CAMPI_ATTIVITA = ['giornata_id', 'ora_inizio', 'ora_fine', 'tipo', 'attivita', 'spazio_id', 'responsabile', 'note', 'ordine'];
 
   function vivo(r) { return r && !Util.bool(r.eliminato); }
 
@@ -1184,8 +1189,9 @@ var Produzioni = (function () {
   }
 
   /** Stato dei blocchi e avvisi: informano, non bloccano mai il salvataggio. */
-  function analisi(eventi, giornate, spazi, squadra, persone) {
+  function analisi(eventi, giornate, spazi, squadra, persone, attivita) {
     var avvisi = [];
+    attivita = attivita || [];
     var date = {};
     giornate.forEach(function (g) { date[g.data] = true; });
     eventi.forEach(function (e) {
@@ -1204,6 +1210,7 @@ var Produzioni = (function () {
       if (Util.bool(p.eliminato)) avvisi.push({ blocco: 'persone', testo: p.nome + ' è stato tolto dalla rubrica' });
       else if (!p.telefono) avvisi.push({ blocco: 'persone', testo: p.nome + ': manca il telefono' });
     });
+    Programma.avvisi(giornate, attivita).forEach(function (a) { avvisi.push({ blocco: 'programma', testo: a.testo, id: a.id }); });
     function stato(n, blocco) {
       if (!n) return 'vuoto';
       return avvisi.some(function (a) { return a.blocco === blocco; }) ? 'in_corso' : 'completo';
@@ -1212,7 +1219,9 @@ var Produzioni = (function () {
       avvisi: avvisi,
       blocchi: {
         struttura: { stato: giornate.length && spazi.length ? stato(1, 'struttura') : (giornate.length || spazi.length ? 'in_corso' : 'vuoto'), giornate: giornate.length, spazi: spazi.length },
-        persone: { stato: stato(squadra.length, 'persone'), squadra: squadra.length }
+        persone: { stato: stato(squadra.length, 'persone'), squadra: squadra.length },
+        programma: { stato: stato(attivita.length, 'programma'), attivita: attivita.length,
+          giornate: giornate.filter(function (g) { return attivita.some(function (a) { return a.giornata_id === g.id; }); }).length }
       }
     };
   }
@@ -1226,25 +1235,30 @@ var Produzioni = (function () {
     var squadra = figli('squadra', pid).sort(perOrdine);
     var persone = {};
     Db.all('persone').forEach(function (r) { persone[r.id] = r; });
-    return { p: p, eventi: eventi, giornate: giornate, spazi: spazi, squadra: squadra, persone: persone };
+    var gioVive = {};
+    giornate.forEach(function (g) { gioVive[g.id] = true; });
+    var attivita = Programma.ordina(figli('attivita', pid).filter(function (a) { return gioVive[a.giornata_id]; }));
+    return { p: p, eventi: eventi, giornate: giornate, spazi: spazi, squadra: squadra, persone: persone, attivita: attivita };
   }
 
   function vista(user, pid, extra) {
     var d = dati(pid);
-    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone);
+    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone, d.attivita);
     var out = {
       id: d.p.id, nome: d.p.nome, tipo: d.p.tipo || 'evento', note: d.p.note || '', versione: d.p.versione || '1',
       aggiornato_il: d.p.aggiornato_il, aggiornato_da: d.p.aggiornato_da,
       eventi: d.eventi.map(function (e) {
         return { id: e.id, titolo: e.titolo, data: e.data, data_fine: e.data_fine || e.data, ora_inizio: e.ora_inizio, ora_fine: e.ora_fine, luogo: e.luogo, stato: e.stato, colore: e.colore || Events.COLORE_DEFAULT };
       }),
-      giornate: d.giornate.map(function (g) { return pubblica(g, ['data', 'etichetta', 'ordine']); }),
+      giornate: d.giornate.map(function (g) { return pubblica(g, ['data', 'etichetta', 'ordine', 'note']); }),
       spazi: d.spazi.map(function (s) { return pubblica(s, ['nome', 'tipo', 'indirizzo', 'note', 'ordine']); }),
       squadra: d.squadra.map(function (s) {
         var o = pubblica(s, ['persona_id', 'ruolo', 'giornata_id', 'spazio_id', 'note', 'ordine']);
         o.persona = personaVista(d.persone[s.persona_id]);
         return o;
       }),
+      attivita: d.attivita.map(function (x) { return pubblica(x, CAMPI_ATTIVITA); }),
+      catalogo_attivita: Programma.ATTIVITA.slice(),
       blocchi: a.blocchi,
       avvisi: a.avvisi,
       permessi: { modificare: Users.can(user, 'modificare'), admin: Users.can(user, 'admin') }
@@ -1258,7 +1272,7 @@ var Produzioni = (function () {
     var p = trova('progetti', pid);
     if (!p) return null;
     var d = dati(pid);
-    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone);
+    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone, d.attivita);
     return { id: p.id, nome: p.nome, tipo: p.tipo || 'evento', eventi: d.eventi.length, blocchi: a.blocchi, avvisi: a.avvisi.length };
   }
 
@@ -1365,6 +1379,14 @@ var Produzioni = (function () {
     if (tipo === 'produzione' && 'nome' in out && !out.nome) throw new CtrlError('INVALID', 'La scheda deve avere un nome');
     if ('ordine' in out && out.ordine && !/^\d{1,6}$/.test(out.ordine)) throw new CtrlError('INVALID', 'Ordine non valido');
     if (tipo === 'squadra' && isNew && !out.persona_id) throw new CtrlError('INVALID', 'Scegli una persona');
+    if (tipo === 'attivita') {
+      if (isNew && !out.giornata_id) throw new CtrlError('INVALID', 'L\'attività deve appartenere a una giornata');
+      if ('giornata_id' in out && !out.giornata_id) throw new CtrlError('INVALID', 'L\'attività deve appartenere a una giornata');
+      ['ora_inizio', 'ora_fine'].forEach(function (k) {
+        if (k in out && out[k] && !Programma.isOra(out[k])) throw new CtrlError('INVALID', 'Orario non valido: ' + out[k] + ' (usa HH:MM)');
+      });
+      if (out.tipo && out.tipo !== Programma.CUSTOM && Programma.ATTIVITA.indexOf(out.tipo) < 0) throw new CtrlError('INVALID', 'Attività non valida: ' + out.tipo);
+    }
     return out;
   }
 
@@ -1389,8 +1411,8 @@ var Produzioni = (function () {
       var now = Util.nowIso();
       var piano = [];
       // stato simulato per validare il lotto prima di scrivere
-      var appartiene = { giornata: {}, spazio: {}, squadra: {} };
-      ['giornata', 'spazio', 'squadra'].forEach(function (t) {
+      var appartiene = { giornata: {}, spazio: {}, squadra: {}, attivita: {} };
+      FIGLI.forEach(function (t) {
         figli(TABELLE[t], pid).forEach(function (r) { appartiene[t][r.id] = r; });
       });
       var persone = {};
@@ -1427,6 +1449,10 @@ var Produzioni = (function () {
           if (esiste && esiste.data) delete dateUsate[esiste.data];
           dateUsate[campi.data] = op.id;
         }
+        if (tipo === 'attivita' && azione !== 'elimina') {
+          if (campi.giornata_id && !appartiene.giornata[campi.giornata_id]) throw new CtrlError('INVALID', 'Giornata non valida' + where);
+          if (campi.spazio_id && !appartiene.spazio[campi.spazio_id]) throw new CtrlError('INVALID', 'Spazio non valido' + where);
+        }
         if (tipo === 'squadra' && azione !== 'elimina') {
           if (campi.persona_id && !persone[campi.persona_id]) throw new CtrlError('INVALID', 'Persona non trovata nella rubrica' + where);
           if (campi.giornata_id && !appartiene.giornata[campi.giornata_id]) throw new CtrlError('INVALID', 'Giornata non valida' + where);
@@ -1438,6 +1464,8 @@ var Produzioni = (function () {
         else appartiene[tipo][op.id] = appartiene[tipo][op.id] || { id: op.id, data: campi.data };
         piano.push({ tipo: tipo, azione: crea ? 'crea' : (azione === 'crea' ? 'modifica' : azione), id: op.id, campi: campi, versione: op.versione, prima: esiste || null });
       });
+
+      if (Object.keys(appartiene.attivita).length > MAX_ATTIVITA) throw new CtrlError('INVALID', 'Troppe attività in una produzione (massimo ' + MAX_ATTIVITA + ')');
 
       // scrittura
       var conflitti = [];
@@ -1464,6 +1492,17 @@ var Produzioni = (function () {
             var campo = o.tipo === 'giornata' ? 'giornata_id' : 'spazio_id';
             figli('squadra', pid).forEach(function (s) {
               if (s[campo] === o.id) { var patch = {}; patch[campo] = ''; patch.aggiornato_il = now; patch.aggiornato_da = user.email; Db.update('squadra', 'id', s.id, patch); }
+            });
+          }
+          // le attività di una giornata tolta si tolgono con lei; quelle di uno spazio tolto restano senza spazio
+          if (o.tipo === 'giornata') {
+            figli('attivita', pid).forEach(function (a) {
+              if (a.giornata_id === o.id) Db.update('attivita', 'id', a.id, { eliminato: 'TRUE', aggiornato_il: now, aggiornato_da: user.email });
+            });
+          }
+          if (o.tipo === 'spazio') {
+            figli('attivita', pid).forEach(function (a) {
+              if (a.spazio_id === o.id) Db.update('attivita', 'id', a.id, { spazio_id: '', aggiornato_il: now, aggiornato_da: user.email });
             });
           }
           return;
@@ -1504,6 +1543,108 @@ var Produzioni = (function () {
   return {
     TIPI_SPAZIO: TIPI_SPAZIO, get: get, riepilogo: riepilogo, crea: crea, collega: collega, scollega: scollega,
     salva: salva, rubrica: rubrica, eliminaPersona: eliminaPersona
+  };
+})();
+
+// ===== 24_Programma.js =====
+/**
+ * CTRL · Programma della produzione (Production Schedule): regole comuni.
+ *
+ * Le stesse regole sono in app/js/programma.js (l'app le usa mentre scrivi);
+ * tests/backend/programma.test.mjs verifica che le due copie diano gli stessi risultati.
+ *
+ * - Orari "HH:MM". La giornata operativa va dalle 06:00 alle 05:59 del giorno dopo:
+ *   un load-out all'01:00 resta nella giornata dello show e si ordina dopo le 23:59.
+ * - Fine prima dell'inizio = attività che passa la mezzanotte.
+ * - Sovrapposizione: due attività con inizio e fine che si accavallano nello stesso spazio
+ *   o con lo stesso responsabile. È un avviso, non blocca nulla.
+ */
+var Programma = (function () {
+  var ATTIVITA = ['Load-in', 'Setup', 'Stage Setup', 'Backline Setup', 'Soundcheck', 'Line Check', 'Rehearsal',
+    'Doors Open', 'Show Start', 'Show End', 'Changeover', 'Break', 'Lunch', 'Dinner', 'Catering', 'Load-out',
+    'Strike', 'Travel', 'Transfer', 'Meeting', 'Artist Arrival', 'Artist Departure'];
+  var CUSTOM = 'Custom';
+  var INIZIO_GIORNATA = 360;
+  var DURATA_MAX = 12 * 60;
+
+  function isOra(s) { return typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s); }
+
+  function minuti(s) {
+    if (!isOra(s)) return null;
+    var m = parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3), 10);
+    return m < INIZIO_GIORNATA ? m + 1440 : m;
+  }
+
+  function intervallo(a) {
+    var s = minuti(a.ora_inizio);
+    if (s === null) return null;
+    var e = minuti(a.ora_fine);
+    if (e === null) return { s: s, e: null };
+    if (e <= s) e += 1440;
+    return { s: s, e: e };
+  }
+
+  function nome(a) { return a.tipo === CUSTOM ? (a.attivita || '') : (a.tipo || ''); }
+
+  function norm(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+
+  /** Ordine cronologico; a parità di orario conta "ordine"; senza orario in fondo. */
+  function ordina(lista) {
+    return lista.slice().sort(function (a, b) {
+      var sa = minuti(a.ora_inizio), sb = minuti(b.ora_inizio);
+      if (sa === null) sa = 99999;
+      if (sb === null) sb = 99999;
+      if (sa !== sb) return sa - sb;
+      return (parseInt(a.ordine, 10) || 0) - (parseInt(b.ordine, 10) || 0);
+    });
+  }
+
+  /** Coppie di attività della stessa giornata che si accavallano. */
+  function sovrapposizioni(lista) {
+    var out = [];
+    var l = ordina(lista);
+    for (var i = 0; i < l.length; i++) {
+      var a = intervallo(l[i]);
+      if (!a || a.e === null) continue;
+      for (var j = i + 1; j < l.length; j++) {
+        var b = intervallo(l[j]);
+        if (!b || b.e === null) continue;
+        if (!(a.s < b.e && b.s < a.e)) continue;
+        var motivo = '';
+        if (l[i].spazio_id && l[i].spazio_id === l[j].spazio_id) motivo = 'spazio';
+        else if (norm(l[i].responsabile) && norm(l[i].responsabile) === norm(l[j].responsabile)) motivo = 'responsabile';
+        if (motivo) out.push({ a: l[i].id, b: l[j].id, motivo: motivo });
+      }
+    }
+    return out;
+  }
+
+  function etichetta(a) { return (nome(a) || 'Attività senza nome') + (a.ora_inizio ? ' ' + a.ora_inizio : ''); }
+
+  /** Avvisi del programma: [{ id, giornata_id, testo }]. */
+  function avvisi(giornate, attivita) {
+    var out = [];
+    giornate.forEach(function (g) {
+      var del = attivita.filter(function (a) { return a.giornata_id === g.id; });
+      var giorno = g.data.slice(8, 10) + '/' + g.data.slice(5, 7);
+      var perId = {};
+      del.forEach(function (a) { perId[a.id] = a; });
+      ordina(del).forEach(function (a) {
+        if (!nome(a)) out.push({ id: a.id, giornata_id: g.id, testo: giorno + ': un\'attività non ha il tipo' });
+        if (!isOra(a.ora_inizio)) out.push({ id: a.id, giornata_id: g.id, testo: giorno + ': ' + (nome(a) || 'un\'attività') + ' senza orario di inizio' });
+        var iv = intervallo(a);
+        if (iv && iv.e !== null && iv.e - iv.s > DURATA_MAX) out.push({ id: a.id, giornata_id: g.id, testo: giorno + ': ' + etichetta(a) + ' dura più di 12 ore, controlla gli orari' });
+      });
+      sovrapposizioni(del).forEach(function (c) {
+        out.push({ id: c.a, altro: c.b, giornata_id: g.id, testo: giorno + ': ' + etichetta(perId[c.a]) + ' e ' + etichetta(perId[c.b]) + ' si sovrappongono (' + (c.motivo === 'spazio' ? 'stesso spazio' : 'stesso responsabile') + ')' });
+      });
+    });
+    return out;
+  }
+
+  return {
+    ATTIVITA: ATTIVITA, CUSTOM: CUSTOM, isOra: isOra, minuti: minuti, intervallo: intervallo, nome: nome,
+    ordina: ordina, sovrapposizioni: sovrapposizioni, avvisi: avvisi
   };
 })();
 

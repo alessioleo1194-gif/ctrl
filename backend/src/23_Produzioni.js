@@ -1,5 +1,5 @@
 /**
- * CTRL · Scheda di produzione (tappa 1: struttura e persone).
+ * CTRL · Scheda di produzione (struttura, persone, programma).
  *
  * Una produzione (tabella "progetti") raggruppa uno o più eventi del Calendar
  * (eventi.progetto_id): un concerto ha un evento, un festival ne ha molti.
@@ -16,17 +16,21 @@ var Produzioni = (function () {
   var MAX_OPS = 200;
   var MAX_GIORNATE_AUTO = 31;
   var TIPI_SPAZIO = ['palco', 'sala', 'venue', 'magazzino', 'altro'];
-  var PREFISSI = { giornata: 'gio', spazio: 'spa', squadra: 'sq', persona: 'per' };
-  var TABELLE = { giornata: 'giornate', spazio: 'location', squadra: 'squadra', persona: 'persone' };
+  var MAX_ATTIVITA = 400; // per produzione
+  var PREFISSI = { giornata: 'gio', spazio: 'spa', squadra: 'sq', persona: 'per', attivita: 'att' };
+  var TABELLE = { giornata: 'giornate', spazio: 'location', squadra: 'squadra', persona: 'persone', attivita: 'attivita' };
+  var FIGLI = ['giornata', 'spazio', 'squadra', 'attivita'];
 
   // Campi modificabili e loro lunghezza massima
   var CAMPI = {
     produzione: { nome: 120, note: 5000 },
-    giornata: { data: 10, etichetta: 60, ordine: 6 },
+    giornata: { data: 10, etichetta: 60, ordine: 6, note: 2000 },
     spazio: { nome: 80, tipo: 20, indirizzo: 200, note: 1000, ordine: 6 },
     squadra: { persona_id: 40, ruolo: 80, giornata_id: 40, spazio_id: 40, note: 500, ordine: 6 },
-    persona: { nome: 80, ruolo: 80, telefono: 30, email: 120, azienda: 80, note: 500 }
+    persona: { nome: 80, ruolo: 80, telefono: 30, email: 120, azienda: 80, note: 500 },
+    attivita: { giornata_id: 40, ora_inizio: 5, ora_fine: 5, tipo: 20, attivita: 80, spazio_id: 40, responsabile: 120, note: 2000, ordine: 6 }
   };
+  var CAMPI_ATTIVITA = ['giornata_id', 'ora_inizio', 'ora_fine', 'tipo', 'attivita', 'spazio_id', 'responsabile', 'note', 'ordine'];
 
   function vivo(r) { return r && !Util.bool(r.eliminato); }
 
@@ -67,8 +71,9 @@ var Produzioni = (function () {
   }
 
   /** Stato dei blocchi e avvisi: informano, non bloccano mai il salvataggio. */
-  function analisi(eventi, giornate, spazi, squadra, persone) {
+  function analisi(eventi, giornate, spazi, squadra, persone, attivita) {
     var avvisi = [];
+    attivita = attivita || [];
     var date = {};
     giornate.forEach(function (g) { date[g.data] = true; });
     eventi.forEach(function (e) {
@@ -87,6 +92,7 @@ var Produzioni = (function () {
       if (Util.bool(p.eliminato)) avvisi.push({ blocco: 'persone', testo: p.nome + ' è stato tolto dalla rubrica' });
       else if (!p.telefono) avvisi.push({ blocco: 'persone', testo: p.nome + ': manca il telefono' });
     });
+    Programma.avvisi(giornate, attivita).forEach(function (a) { avvisi.push({ blocco: 'programma', testo: a.testo, id: a.id }); });
     function stato(n, blocco) {
       if (!n) return 'vuoto';
       return avvisi.some(function (a) { return a.blocco === blocco; }) ? 'in_corso' : 'completo';
@@ -95,7 +101,9 @@ var Produzioni = (function () {
       avvisi: avvisi,
       blocchi: {
         struttura: { stato: giornate.length && spazi.length ? stato(1, 'struttura') : (giornate.length || spazi.length ? 'in_corso' : 'vuoto'), giornate: giornate.length, spazi: spazi.length },
-        persone: { stato: stato(squadra.length, 'persone'), squadra: squadra.length }
+        persone: { stato: stato(squadra.length, 'persone'), squadra: squadra.length },
+        programma: { stato: stato(attivita.length, 'programma'), attivita: attivita.length,
+          giornate: giornate.filter(function (g) { return attivita.some(function (a) { return a.giornata_id === g.id; }); }).length }
       }
     };
   }
@@ -109,25 +117,30 @@ var Produzioni = (function () {
     var squadra = figli('squadra', pid).sort(perOrdine);
     var persone = {};
     Db.all('persone').forEach(function (r) { persone[r.id] = r; });
-    return { p: p, eventi: eventi, giornate: giornate, spazi: spazi, squadra: squadra, persone: persone };
+    var gioVive = {};
+    giornate.forEach(function (g) { gioVive[g.id] = true; });
+    var attivita = Programma.ordina(figli('attivita', pid).filter(function (a) { return gioVive[a.giornata_id]; }));
+    return { p: p, eventi: eventi, giornate: giornate, spazi: spazi, squadra: squadra, persone: persone, attivita: attivita };
   }
 
   function vista(user, pid, extra) {
     var d = dati(pid);
-    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone);
+    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone, d.attivita);
     var out = {
       id: d.p.id, nome: d.p.nome, tipo: d.p.tipo || 'evento', note: d.p.note || '', versione: d.p.versione || '1',
       aggiornato_il: d.p.aggiornato_il, aggiornato_da: d.p.aggiornato_da,
       eventi: d.eventi.map(function (e) {
         return { id: e.id, titolo: e.titolo, data: e.data, data_fine: e.data_fine || e.data, ora_inizio: e.ora_inizio, ora_fine: e.ora_fine, luogo: e.luogo, stato: e.stato, colore: e.colore || Events.COLORE_DEFAULT };
       }),
-      giornate: d.giornate.map(function (g) { return pubblica(g, ['data', 'etichetta', 'ordine']); }),
+      giornate: d.giornate.map(function (g) { return pubblica(g, ['data', 'etichetta', 'ordine', 'note']); }),
       spazi: d.spazi.map(function (s) { return pubblica(s, ['nome', 'tipo', 'indirizzo', 'note', 'ordine']); }),
       squadra: d.squadra.map(function (s) {
         var o = pubblica(s, ['persona_id', 'ruolo', 'giornata_id', 'spazio_id', 'note', 'ordine']);
         o.persona = personaVista(d.persone[s.persona_id]);
         return o;
       }),
+      attivita: d.attivita.map(function (x) { return pubblica(x, CAMPI_ATTIVITA); }),
+      catalogo_attivita: Programma.ATTIVITA.slice(),
       blocchi: a.blocchi,
       avvisi: a.avvisi,
       permessi: { modificare: Users.can(user, 'modificare'), admin: Users.can(user, 'admin') }
@@ -141,7 +154,7 @@ var Produzioni = (function () {
     var p = trova('progetti', pid);
     if (!p) return null;
     var d = dati(pid);
-    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone);
+    var a = analisi(d.eventi, d.giornate, d.spazi, d.squadra, d.persone, d.attivita);
     return { id: p.id, nome: p.nome, tipo: p.tipo || 'evento', eventi: d.eventi.length, blocchi: a.blocchi, avvisi: a.avvisi.length };
   }
 
@@ -248,6 +261,14 @@ var Produzioni = (function () {
     if (tipo === 'produzione' && 'nome' in out && !out.nome) throw new CtrlError('INVALID', 'La scheda deve avere un nome');
     if ('ordine' in out && out.ordine && !/^\d{1,6}$/.test(out.ordine)) throw new CtrlError('INVALID', 'Ordine non valido');
     if (tipo === 'squadra' && isNew && !out.persona_id) throw new CtrlError('INVALID', 'Scegli una persona');
+    if (tipo === 'attivita') {
+      if (isNew && !out.giornata_id) throw new CtrlError('INVALID', 'L\'attività deve appartenere a una giornata');
+      if ('giornata_id' in out && !out.giornata_id) throw new CtrlError('INVALID', 'L\'attività deve appartenere a una giornata');
+      ['ora_inizio', 'ora_fine'].forEach(function (k) {
+        if (k in out && out[k] && !Programma.isOra(out[k])) throw new CtrlError('INVALID', 'Orario non valido: ' + out[k] + ' (usa HH:MM)');
+      });
+      if (out.tipo && out.tipo !== Programma.CUSTOM && Programma.ATTIVITA.indexOf(out.tipo) < 0) throw new CtrlError('INVALID', 'Attività non valida: ' + out.tipo);
+    }
     return out;
   }
 
@@ -272,8 +293,8 @@ var Produzioni = (function () {
       var now = Util.nowIso();
       var piano = [];
       // stato simulato per validare il lotto prima di scrivere
-      var appartiene = { giornata: {}, spazio: {}, squadra: {} };
-      ['giornata', 'spazio', 'squadra'].forEach(function (t) {
+      var appartiene = { giornata: {}, spazio: {}, squadra: {}, attivita: {} };
+      FIGLI.forEach(function (t) {
         figli(TABELLE[t], pid).forEach(function (r) { appartiene[t][r.id] = r; });
       });
       var persone = {};
@@ -310,6 +331,10 @@ var Produzioni = (function () {
           if (esiste && esiste.data) delete dateUsate[esiste.data];
           dateUsate[campi.data] = op.id;
         }
+        if (tipo === 'attivita' && azione !== 'elimina') {
+          if (campi.giornata_id && !appartiene.giornata[campi.giornata_id]) throw new CtrlError('INVALID', 'Giornata non valida' + where);
+          if (campi.spazio_id && !appartiene.spazio[campi.spazio_id]) throw new CtrlError('INVALID', 'Spazio non valido' + where);
+        }
         if (tipo === 'squadra' && azione !== 'elimina') {
           if (campi.persona_id && !persone[campi.persona_id]) throw new CtrlError('INVALID', 'Persona non trovata nella rubrica' + where);
           if (campi.giornata_id && !appartiene.giornata[campi.giornata_id]) throw new CtrlError('INVALID', 'Giornata non valida' + where);
@@ -321,6 +346,8 @@ var Produzioni = (function () {
         else appartiene[tipo][op.id] = appartiene[tipo][op.id] || { id: op.id, data: campi.data };
         piano.push({ tipo: tipo, azione: crea ? 'crea' : (azione === 'crea' ? 'modifica' : azione), id: op.id, campi: campi, versione: op.versione, prima: esiste || null });
       });
+
+      if (Object.keys(appartiene.attivita).length > MAX_ATTIVITA) throw new CtrlError('INVALID', 'Troppe attività in una produzione (massimo ' + MAX_ATTIVITA + ')');
 
       // scrittura
       var conflitti = [];
@@ -347,6 +374,17 @@ var Produzioni = (function () {
             var campo = o.tipo === 'giornata' ? 'giornata_id' : 'spazio_id';
             figli('squadra', pid).forEach(function (s) {
               if (s[campo] === o.id) { var patch = {}; patch[campo] = ''; patch.aggiornato_il = now; patch.aggiornato_da = user.email; Db.update('squadra', 'id', s.id, patch); }
+            });
+          }
+          // le attività di una giornata tolta si tolgono con lei; quelle di uno spazio tolto restano senza spazio
+          if (o.tipo === 'giornata') {
+            figli('attivita', pid).forEach(function (a) {
+              if (a.giornata_id === o.id) Db.update('attivita', 'id', a.id, { eliminato: 'TRUE', aggiornato_il: now, aggiornato_da: user.email });
+            });
+          }
+          if (o.tipo === 'spazio') {
+            figli('attivita', pid).forEach(function (a) {
+              if (a.spazio_id === o.id) Db.update('attivita', 'id', a.id, { spazio_id: '', aggiornato_il: now, aggiornato_da: user.email });
             });
           }
           return;

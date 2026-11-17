@@ -18,6 +18,21 @@ export function nuovoId(prefisso) {
   return prefisso + '_' + Array.from(a, b => (b % 36).toString(36)).join('');
 }
 
+/**
+ * Ordine di invio: prima si creano gli elementi a cui altri fanno riferimento (giornate, spazi, persone),
+ * per ultimi si tolgono giornate e spazi. Serve perché le modifiche allo stesso elemento si fondono:
+ * un'attività creata prima di un nuovo spazio può arrivare già collegata a quello spazio.
+ */
+const PRIORITA = { persona: 0, giornata: 1, spazio: 2 };
+export function ordinaLotto(ops) {
+  const peso = (op) => {
+    if (op.azione === 'crea' && op.tipo in PRIORITA) return PRIORITA[op.tipo];
+    if (op.azione === 'elimina' && (op.tipo === 'giornata' || op.tipo === 'spazio')) return 9;
+    return 5;
+  };
+  return ops.map((op, i) => [op, i]).sort((x, y) => peso(x[0]) - peso(y[0]) || x[1] - y[1]).map(x => x[0]);
+}
+
 export function creaSalvataggio({ id, onStato, onRisposta, attesa = 900 }) {
   let coda = new Map();   // chiave tipo:id -> operazione
   let inVolo = null;      // operazioni in invio
@@ -60,7 +75,7 @@ export function creaSalvataggio({ id, onStato, onRisposta, attesa = 900 }) {
 
   async function invia() {
     if (inVolo || fermo || !coda.size) return;
-    inVolo = [...coda.values()];
+    inVolo = ordinaLotto([...coda.values()]);
     coda = new Map();
     avvisa();
     try {

@@ -6,14 +6,15 @@
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
     'descrizione', 'colore', 'progetto_id', 'cartella_id', 'stato', 'note',
     'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'versione', 'sync_il'],
+  // programma della produzione (Production Schedule). evento_id resta per compatibilità, non si usa più.
   attivita: ['id', 'evento_id', 'ora_inizio', 'ora_fine', 'attivita', 'responsabile', 'note', 'ordine',
-    'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione'],
+    'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione', 'progetto_id', 'giornata_id', 'spazio_id', 'tipo'],
   materiale: ['id', 'evento_id', 'voce', 'quantita', 'area', 'provenienza', 'fornitore', 'note', 'ordine',
     'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione'],
   canali: ['id', 'evento_id', 'numero', 'sorgente', 'microfono', 'di', 'asta', 'note', 'ordine',
@@ -28,7 +29,7 @@ var SCHEMA = {
   location: ['id', 'progetto_id', 'nome', 'indirizzo', 'note', 'versione', 'tipo', 'ordine', 'eliminato', 'creato_il',
     'aggiornato_il', 'aggiornato_da'],
   giornate: ['id', 'progetto_id', 'data', 'etichetta', 'ordine', 'eliminato', 'creato_il', 'aggiornato_il',
-    'aggiornato_da', 'versione'],
+    'aggiornato_da', 'versione', 'note'],
   // rubrica comune a tutte le produzioni
   persone: ['id', 'nome', 'ruolo', 'telefono', 'email', 'azienda', 'note', 'eliminato', 'creato_il', 'creato_da',
     'aggiornato_il', 'aggiornato_da', 'versione'],

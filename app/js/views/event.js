@@ -83,7 +83,7 @@ function produzioneCard(ev, p) {
       h('header', {}, h('span', { class: 'label' }, 'Scheda di produzione')),
       h('div', { class: 'in', style: { display: 'grid', gap: '10px' } },
         h('p', { class: 'help', style: { margin: 0 } }, p.modificare
-          ? 'Giornate, spazi e squadra in un unico posto. Si parte dalle date e dal luogo di questo evento.'
+          ? 'Programma, giornate, spazi e squadra in un unico posto. Si parte dalle date e dal luogo di questo evento.'
           : 'Nessuna scheda di produzione per questo evento.'),
         crea ? h('div', { class: 'row' }, crea) : null, status));
   }
@@ -94,6 +94,7 @@ function produzioneCard(ev, p) {
       h('a', { class: 'btn primary', href: '#/p/' + pr.id }, 'Apri scheda')),
     h('div', { class: 'in', style: { display: 'grid', gap: '6px' } },
       pr.tipo === 'festival' ? h('p', { style: { margin: '0 0 4px' } }, h('b', {}, pr.nome), h('span', { class: 'help' }, ` · ${pr.eventi} eventi`)) : null,
+      b.programma ? riga('Programma', `${b.programma.attivita} attività`, b.programma.stato) : null,
       riga('Struttura', `${b.struttura.giornate} ${b.struttura.giornate === 1 ? 'giornata' : 'giornate'}, ${b.struttura.spazi} ${b.struttura.spazi === 1 ? 'spazio' : 'spazi'}`, b.struttura.stato),
       riga('Persone', `${b.persone.squadra} in squadra`, b.persone.stato),
       pr.avvisi ? h('a', { class: 'help', href: '#/p/' + pr.id }, pr.avvisi === 1 ? '1 avviso da controllare' : pr.avvisi + ' avvisi da controllare') : null));
