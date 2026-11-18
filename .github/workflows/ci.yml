@@ -19,7 +19,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       # il test dell'export Excel apre il file .xlsx con openpyxl per verificare fogli e formule
       - name: openpyxl (verifica del file .xlsx)
-        run: python3 -m pip install --break-system-packages openpyxl || python3 -m pip install openpyxl
+        run: sudo apt-get install -y python3-openpyxl
       - name: Codice.gs allineato ai sorgenti
         run: npm run check
       - name: Test del backend (servizi Google simulati)
