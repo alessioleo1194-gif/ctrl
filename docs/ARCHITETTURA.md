@@ -103,3 +103,12 @@ Il popup (`app/js/stats-popup.js`) si aggancia a `nomeTag` solo se chi guarda è
 - Ogni chiamata all'API impiega circa 1-2 secondi (Apps Script): stima da misurare sul campo.
 - Massimo 100 email al giorno da Apps Script con account Gmail: bastano perché i codici servono una volta ogni 30 giorni.
 - Netlify gratuito: 300 crediti al mese (circa 20 pubblicazioni).
+
+## Prestazioni (0.13.0)
+
+- Ogni chiamata ad Apps Script costa 1,2–1,9 s di base: contano **quante chiamate si fanno in fila**, non quanto lavora ciascuna. Regola: una schermata = una chiamata, il resto in parallelo o dopo.
+- `app.avvio` = profilo + impostazioni + elenco eventi. `staff.gestisci` e `turni.salva` rispondono con la lista staff **e** `evento` aggiornato.
+- L'evento si disegna subito da `store.events` (stale-while-revalidate): `eventi.get` arriva in background; i riquadri che dipendono dai dati completi hanno `data-slot` (produzione, allegati, storico) e si sostituiscono da soli.
+- Service worker: cache-first per l'interfaccia, mai per l'API. **Ogni modifica a `app/` richiede di aumentare `VERSION` in `app/sw.js`**; ogni nuovo modulo va aggiunto a `SHELL` (e al `modulepreload` di `index.html` se è nell'avvio): `tests/unit/sw.test.mjs` lo controlla.
+- Sezioni pesanti (impostazioni, report, piano, materiali) con `import()` dinamico: non vanno importate in modo statico dai moduli dell'avvio.
+- Misura: `node scripts/perf-mock.mjs` (letture dei fogli per azione, con Google simulato).

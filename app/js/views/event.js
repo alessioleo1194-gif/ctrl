@@ -8,22 +8,64 @@ import { staffCard } from './staff.js';
 import { giornateCard } from '../giornate.js';
 import { nomeTag } from '../persone.js';
 
-/** Dettaglio evento: informazioni, scheda di produzione, file allegati, note. */
+/** I campi che arrivano solo da eventi.get: il resto è già nell'elenco e si mostra subito. */
+const EXTRA = ['allegati', 'produzione', 'storico'];
+const nucleo = (ev) => JSON.stringify(ev, (k, v) => (EXTRA.includes(k) ? undefined : v));
+
+let aperture = 0;   // conta le aperture: una risposta in ritardo di un evento già chiuso non deve ridisegnare nulla
+
+/**
+ * Dettaglio evento. L'evento compare subito dai dati dell'elenco già in memoria (titolo, giornate, staff, note);
+ * documenti, file e storico si riempiono appena arriva la risposta del server, che riallinea anche il resto.
+ */
 export async function renderEvent(pane, id) {
-  pane.replaceChildren(loading('Apertura evento…'));
+  const mio = ++aperture;
+  pane.dataset.evento = id;
+  const noto = store.events && store.events.find(e => e.id === id);
+  if (noto) draw(pane, noto);
+  else pane.replaceChildren(loading('Apertura evento…'));
   let ev;
   try {
     ev = await api('eventi.get', { id });
   } catch (e) {
+    if (mio !== aperture) return;
     pane.replaceChildren(h('div', { class: 'empty' },
       h('div', { class: 'banner' }, e.code === 'NOT_FOUND' ? 'Evento non trovato: potrebbe essere stato archiviato.' : e.message),
       h('p', {}, h('a', { class: 'btn', href: '#/' }, 'Torna agli eventi'))));
     return;
   }
-  draw(pane, ev);
+  if (mio !== aperture) return;
+  const eraNoto = noto && noto.versione === ev.versione && nucleo(noto) === nucleo(ev);
+  upsertEvent(ev);
+  if (!noto || !eraNoto) {
+    // qualcosa è cambiato rispetto all'elenco: si ridisegna tutto, a meno che si stia già scrivendo una nota
+    if (!modificheInCorso(pane)) { draw(pane, ev); return; }
+  }
+  riempiExtra(pane, ev);
 }
 
-function draw(pane, ev) {
+/** C'è testo scritto e non ancora salvato in questa pagina? Allora non si ridisegna sotto le mani di chi scrive. */
+function modificheInCorso(pane) {
+  return [...pane.querySelectorAll('textarea, input')].some(el => el.value !== (el.defaultValue ?? el.value));
+}
+
+/** Sostituisce i riquadri che dipendono dai dati completi (documenti, file, storico) senza toccare il resto. */
+function riempiExtra(pane, ev) {
+  const p = store.user.permessi;
+  const sostituisci = (nome, nuovo) => {
+    const vecchio = pane.querySelector('[data-slot="' + nome + '"]');
+    if (!vecchio) return;
+    if (nuovo) vecchio.replaceWith(nuovo); else vecchio.remove();
+  };
+  const bloccato = ev.accesso === false;
+  if (!bloccato) {
+    sostituisci('produzione', produzioneCard(ev, p));
+    sostituisci('allegati', allegatiCard(ev));
+  }
+  sostituisci('storico', storicoCard(ev, p));
+}
+
+function draw(pane, ev, extra) {
   const p = store.user.permessi;
   const back = h('a', { class: 'btn ghost mob-only', href: '#/', style: { marginLeft: '-12px', paddingLeft: '8px' } }, icon('back'), 'Eventi');
 
@@ -54,20 +96,28 @@ function draw(pane, ev) {
 
   // chi non è nello staff vede l'evento ma non documenti, file e note
   const bloccato = ev.accesso === false;
-  const staff = p.admin ? staffCard(ev, (upd) => draw(pane, upd)) : null;
-  const giornate = giornateCard(ev, (upd) => draw(pane, upd));
+  const staff = p.admin ? staffCard(ev, (upd, x) => draw(pane, upd, x), extra && extra.staff) : null;
+  const giornate = giornateCard(ev, (upd, x) => draw(pane, upd, x));
   const notes = bloccato ? null : notesCard(ev, p, (upd) => draw(pane, upd));
   const produzione = bloccato ? bloccatoCard() : produzioneCard(ev, p);
   const allegati = bloccato ? null : allegatiCard(ev);
+  const histo = storicoCard(ev, p);
 
   const admin = p.admin ? adminCard(ev, pane) : null;
-  const histo = p.admin && ev.storico?.length ? h('section', { class: 'card' },
+
+  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, giornate, staff, produzione, allegati, notes, admin, histo));
+}
+
+/** Ultime modifiche (solo Owner). Finché i dati completi non arrivano il posto resta segnato con un riquadro vuoto. */
+function storicoCard(ev, p) {
+  if (!p.admin) return null;
+  if (!ev.storico) return h('section', { class: 'card skel', 'data-slot': 'storico', 'aria-hidden': 'true' }, h('header', {}, h('span', { class: 'label' }, 'Ultime modifiche')));
+  if (!ev.storico.length) return h('span', { 'data-slot': 'storico', hidden: true });
+  return h('section', { class: 'card', 'data-slot': 'storico' },
     h('header', {}, h('span', { class: 'label' }, 'Ultime modifiche')),
     h('div', { class: 'in histo' }, ev.storico.map(s => h('div', {},
       h('span', { class: 'mono help' }, stamp(s.ts)),
-      h('span', {}, h('b', {}, s.email === 'calendar' ? 'Calendar' : s.email), ' · ', s.azione, s.dopo ? h('span', { class: 'help' }, ' ' + s.dopo.slice(0, 140)) : null))))) : null;
-
-  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, giornate, staff, produzione, allegati, notes, admin, histo));
+      h('span', {}, h('b', {}, s.email === 'calendar' ? 'Calendar' : s.email), ' · ', s.azione, s.dopo ? h('span', { class: 'help' }, ' ' + s.dopo.slice(0, 140)) : null)))));
 }
 
 /** Al posto di documenti, file e note per chi non è assegnato all'evento. */
@@ -88,9 +138,12 @@ function bloccatoCard() {
  * La produzione (che raggruppa gli eventi di un festival) si crea da sola alla prima apertura.
  */
 function produzioneCard(ev, p) {
-  const pr = ev.produzione;
+  // finché i dati completi non sono arrivati si conosce solo l'id della produzione (dall'elenco): i pulsanti funzionano già
+  const inCaricamento = ev.produzione === undefined;
+  const pr = inCaricamento ? (ev.produzione_id ? { id: ev.produzione_id, tipo: '', eventi: [], documenti: {} } : null) : ev.produzione;
   const status = h('div', { class: 'status-line' });
   const info = (tipo) => {
+    if (inCaricamento && pr) return '…';
     const d = pr && pr.documenti && pr.documenti[tipo];
     return d ? 'Compilato · modificato ' + stamp(d.aggiornato_il) : 'Da compilare';
   };
@@ -102,17 +155,17 @@ function produzioneCard(ev, p) {
       const b = e.currentTarget; b.disabled = true;
       try {
         const nuova = await api('produzione.assicura', { evento_id: ev.id });
-        const x = store.events?.find(y => y.id === ev.id); if (x) x.produzione_id = nuova.id;
+        const x = store.events?.find(y => y.id === ev.id); if (x) { x.produzione_id = nuova.id; x.produzione = undefined; }
         navigate('#/p/' + nuova.id + '/' + tipo);
       } catch (err) { status.className = 'status-line err'; status.textContent = err.message; b.disabled = false; }
     } }, corpo);
   };
-  return h('section', { class: 'card prod-card' },
+  return h('section', { class: 'card prod-card', 'data-slot': 'produzione' },
     h('header', {}, h('span', { class: 'label' }, pr && pr.tipo === 'festival' ? 'Documenti di produzione · festival' : 'Documenti di produzione')),
     h('div', { class: 'in', style: { display: 'grid', gap: '10px' } },
       h('div', { class: 'doc-btns' }, apri('plan', 'Production Plan', 'piano', 'piano'), apri('materiali', 'Material List', 'materiale', 'materiale')),
       pr && pr.eventi.length > 1 ? h('p', { class: 'help', style: { margin: 0 } }, 'Condivisi con: ' + pr.eventi.filter(e => e.id !== ev.id).map(e => e.titolo).join(' · ')) : null,
-      pr && p.modificare ? festivalMenu(ev, pr) : null,
+      pr && !inCaricamento && p.modificare ? festivalMenu(ev, pr) : null,
       status));
 }
 
@@ -125,7 +178,7 @@ function festivalMenu(ev, pr) {
     try {
       const nuova = await fn();
       if (store.events) store.events.forEach(y => {
-        if (nuova.eventi.some(z => z.id === y.id)) y.produzione_id = nuova.id; else if (y.produzione_id === nuova.id) y.produzione_id = '';
+        if (nuova.eventi.some(z => z.id === y.id)) { y.produzione_id = nuova.id; y.produzione = undefined; } else if (y.produzione_id === nuova.id) { y.produzione_id = ''; y.produzione = undefined; }
       });
       const pane = det.closest('.pane-detail');
       if (pane) renderEvent(pane, ev.id);

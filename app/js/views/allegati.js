@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { h, icon, toast } from '../ui.js';
+import { h, icon, toast, loading } from '../ui.js';
 import { store, refreshList } from '../app.js';
 import { stamp } from '../format.js';
 
@@ -25,14 +25,20 @@ function fmtByte(n) {
 /** Aggiorna l'indicatore nella lista eventi senza ricaricarla. */
 function syncIndicator(ev, key, files) {
   const on = files.length > 0;
+  const cambiato = !ev.stato_doc || ev.stato_doc[key] !== on;
   ev.stato_doc = { ...ev.stato_doc, [key]: on };
+  // l'evento aperto e quello dell'elenco possono essere lo stesso oggetto: l'indicatore va ridisegnato in ogni caso se è cambiato
   const e = store.events?.find(x => x.id === ev.id);
-  if (e && e.stato_doc[key] !== on) { e.stato_doc = { ...e.stato_doc, [key]: on }; refreshList(); }
+  if (e && e !== ev && e.stato_doc[key] !== on) { e.stato_doc = { ...e.stato_doc, [key]: on }; refreshList(); }
+  else if (cambiato) refreshList();
 }
 
 export function allegatiCard(ev) {
   const p = store.user.permessi;
-  const card = h('section', { class: 'card', id: 'allegati' });
+  // l'elenco dei file arriva con i dati completi dell'evento: nell'attesa il riquadro è già al suo posto
+  if (!ev.allegati) return h('section', { class: 'card', id: 'allegati', 'data-slot': 'allegati' },
+    h('header', {}, h('span', { class: 'label' }, 'File allegati')), h('div', { class: 'in' }, loading('File…')));
+  const card = h('section', { class: 'card', id: 'allegati', 'data-slot': 'allegati' });
   const totale = () => SEZIONI.reduce((n, s) => n + ev.allegati[s.k].length, 0);
 
   function draw() {

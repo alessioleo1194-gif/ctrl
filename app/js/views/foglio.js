@@ -54,7 +54,7 @@ export async function apriFoglio(main, produzioneId, tipo, tipoFoglio) {
       await api('documento.pdf', { produzione_id: produzioneId, tipo, nome: nomeFile({ ...d, titolo: nome }), dati });
       pdfSporco = false;
       stato.dataset.stato = 'ok'; stato.textContent = 'Salvato · PDF aggiornato nell\'evento';
-      (store.events || []).filter(x => x.produzione_id === produzioneId).forEach(x => { if (x.stato_doc) x.stato_doc[tipo === 'plan' ? 'piano' : 'materiale'] = true; });
+      (store.events || []).filter(x => x.produzione_id === produzioneId).forEach(x => { if (x.stato_doc) x.stato_doc[tipo === 'plan' ? 'piano' : 'materiale'] = true; x.produzione = undefined; });
     } catch (e) {
       stato.dataset.stato = 'errore'; stato.textContent = 'Documento salvato, PDF non aggiornato: ' + e.message;
     }

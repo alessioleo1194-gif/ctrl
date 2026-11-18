@@ -172,8 +172,13 @@ export function giornateCard(ev, redraw) {
       const st = h('span', { class: 'status-line' });
       const invia = async (i, f, nota) => {
         try {
-          await api('turni.salva', { evento_id: ev.id, giorno_id: g.id, email: s.email, ora_inizio: i, ora_fine: f, nota });
-          await ricarica();
+          const r = await api('turni.salva', { evento_id: ev.id, giorno_id: g.id, email: s.email, ora_inizio: i, ora_fine: f, nota });
+          if (r && r.evento) {
+            // il server ha già mandato l'evento aggiornato e la lista dello staff: niente riletture
+            const { evento, ...lista } = r;
+            const y = window.scrollY;
+            upsertEvent(evento); redraw(evento, { staff: lista }); window.scrollTo(0, y);
+          } else await ricarica();
         } catch (e) { st.className = 'status-line err'; st.textContent = e.message; }
       };
       riga.append(h('div', { class: 'g-turno-ed' },

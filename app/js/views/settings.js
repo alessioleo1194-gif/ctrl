@@ -11,10 +11,11 @@ export async function renderSettings(main) {
   const wrap = h('div', { class: 'settings' });
   main.replaceChildren(wrap);
   wrap.append(loading('Caricamento impostazioni…'));
-  let users, settings, richieste, registro;
+  let users, settings, richieste;
   try {
-    [users, settings, richieste, registro] = await Promise.all([
-      api('utenti.list', {}), api('impostazioni.get', {}), api('accesso.richieste', {}), api('accessi.list', {})
+    // il registro accessi è la tabella più grande e sta in fondo alla pagina: si carica dopo, a pagina già visibile
+    [users, settings, richieste] = await Promise.all([
+      api('utenti.list', {}), api('impostazioni.get', {}), api('accesso.richieste', {})
     ]);
     store.settings = settings;
   } catch (e) {
@@ -30,7 +31,7 @@ export async function renderSettings(main) {
       h('a', { class: 'btn', href: '#/' }, icon('back'), 'Eventi')),
     // le richieste in attesa vanno prima: sono l'unica cosa che aspetta una tua decisione
     ...(richieste.length ? [cRichieste, cUtenti] : [cUtenti, cRichieste]),
-    logCard(registro),
+    logCard(null),
     listCard('aree', 'Aree del materiale', settings.liste.aree),
     listCard('provenienze', 'Provenienze del materiale', settings.liste.provenienze),
     syncCard(settings),
@@ -289,7 +290,8 @@ function logCard(iniziale) {
   }
   ricerca.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { q = ricerca.value.trim(); carica(); }, 250); });
   filtri();
-  disegna(iniziale);
+  if (iniziale) disegna(iniziale);
+  else { tab.replaceChildren(loading('Registro…')); carica(); }
   return h('section', { class: 'card', id: 'registro-accessi' },
     h('header', {}, h('span', { class: 'label' }, 'Registro accessi')),
     h('div', { class: 'logbar' }, bar, ricerca),

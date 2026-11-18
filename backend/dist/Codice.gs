@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.12.1
+ * CTRL API · versione 0.13.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.12.1';
+var CTRL_VERSION = '0.13.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -1572,7 +1572,10 @@ var Staff = (function () {
         scrivi({ stato: 'proposta', trovato: trovati[email].trovato, termine: trovati[email].termine }, riga.stato);
       }
     });
-    return lista(actor, { evento_id: e.id });
+    // la risposta porta anche l'evento aggiornato: il frontend non deve rileggerlo con una seconda chiamata
+    var out = lista(actor, { evento_id: e.id });
+    out.evento = Events.get(actor, { id: e.id });
+    return out;
   }
 
   return {
@@ -3051,7 +3054,10 @@ var Turni = (function () {
       var d = Storico.diff(prima, row, ['ora_inizio', 'ora_fine', 'nota']);
       if (d.changed) { d.prima.giorno = g.data; d.prima.persona = email; Storico.log(actor.email, e.id, 'turno', 'modifica', row.id, d.prima, d.dopo); }
     });
-    return Staff.lista(actor, { evento_id: e.id });
+    // come staff.gestisci: insieme alla lista c'è l'evento aggiornato, così il frontend non lo rilegge
+    var out = Staff.lista(actor, { evento_id: e.id });
+    out.evento = Events.get(actor, { id: e.id });
+    return out;
   }
 
   /** Controllo disponibilità prima di assegnare: per ogni giornata dice se la persona è libera. Non scrive nulla. */
@@ -3241,6 +3247,8 @@ var ACTIONS = {
   'accesso.richiedi': { pub: true, fn: function (u, p) { return Richieste.crea(p); } },
   'auth.me': { fn: function (u) { return Users.publicProfile(u); } },
   'auth.logout': { fn: function (u, p, token) { return Auth.logout(token); } },
+  // avvio dell'app in una sola chiamata: profilo, impostazioni ed elenco eventi (prima erano tre chiamate in fila)
+  'app.avvio': { fn: function (u) { return { utente: Users.publicProfile(u), impostazioni: Settings.get(), eventi: Events.list(u, {}) }; } },
 
   'eventi.list': { fn: function (u, p) { return Events.list(u, p); } },
   'eventi.get': { fn: function (u, p) { return Events.get(u, p); } },
@@ -3308,8 +3316,10 @@ function handleRequest(body) {
     }
     var def = ACTIONS[req.action];
     var payload = req.payload && typeof req.payload === 'object' ? req.payload : {};
-    var user = def.pub ? null : Auth.current(req.token);
+    // ogni richiesta parte da fogli riletti; la cache si svuota PRIMA dell'autenticazione, così le tabelle
+    // lette per verificare la sessione (utenti) servono anche all'azione senza una seconda lettura
     Db.clearCache();
+    var user = def.pub ? null : Auth.current(req.token);
     var data = def.fn(user, payload, req.token);
     return { ok: true, data: data };
   } catch (err) {

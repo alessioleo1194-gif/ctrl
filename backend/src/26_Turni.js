@@ -326,7 +326,10 @@ var Turni = (function () {
       var d = Storico.diff(prima, row, ['ora_inizio', 'ora_fine', 'nota']);
       if (d.changed) { d.prima.giorno = g.data; d.prima.persona = email; Storico.log(actor.email, e.id, 'turno', 'modifica', row.id, d.prima, d.dopo); }
     });
-    return Staff.lista(actor, { evento_id: e.id });
+    // come staff.gestisci: insieme alla lista c'è l'evento aggiornato, così il frontend non lo rilegge
+    var out = Staff.lista(actor, { evento_id: e.id });
+    out.evento = Events.get(actor, { id: e.id });
+    return out;
   }
 
   /** Controllo disponibilità prima di assegnare: per ogni giornata dice se la persona è libera. Non scrive nulla. */

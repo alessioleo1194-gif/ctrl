@@ -11,6 +11,8 @@ var ACTIONS = {
   'accesso.richiedi': { pub: true, fn: function (u, p) { return Richieste.crea(p); } },
   'auth.me': { fn: function (u) { return Users.publicProfile(u); } },
   'auth.logout': { fn: function (u, p, token) { return Auth.logout(token); } },
+  // avvio dell'app in una sola chiamata: profilo, impostazioni ed elenco eventi (prima erano tre chiamate in fila)
+  'app.avvio': { fn: function (u) { return { utente: Users.publicProfile(u), impostazioni: Settings.get(), eventi: Events.list(u, {}) }; } },
 
   'eventi.list': { fn: function (u, p) { return Events.list(u, p); } },
   'eventi.get': { fn: function (u, p) { return Events.get(u, p); } },
@@ -78,8 +80,10 @@ function handleRequest(body) {
     }
     var def = ACTIONS[req.action];
     var payload = req.payload && typeof req.payload === 'object' ? req.payload : {};
-    var user = def.pub ? null : Auth.current(req.token);
+    // ogni richiesta parte da fogli riletti; la cache si svuota PRIMA dell'autenticazione, così le tabelle
+    // lette per verificare la sessione (utenti) servono anche all'azione senza una seconda lettura
     Db.clearCache();
+    var user = def.pub ? null : Auth.current(req.token);
     var data = def.fn(user, payload, req.token);
     return { ok: true, data: data };
   } catch (err) {

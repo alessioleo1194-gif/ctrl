@@ -24,36 +24,46 @@ const peggiore = (lista) => lista.reduce((m, l) => (l && (!m || RANGO[l] > RANGO
  * Prima di assegnare si controlla la disponibilità giornata per giornata: l'avviso non blocca mai
  * ("Assegna comunque"), e si può assegnare solo ai giorni liberi.
  */
-export function staffCard(ev, onChange) {
+const inVolo = new Map();   // richieste dello staff in corso per evento: due ridisegni ravvicinati ne fanno una sola
+
+function caricaLista(id) {
+  if (inVolo.has(id)) return inVolo.get(id);
+  const p = api('staff.evento', { evento_id: id }).finally(() => inVolo.delete(id));
+  inVolo.set(id, p);
+  return p;
+}
+
+export function staffCard(ev, onChange, preload) {
   const card = h('section', { class: 'card', id: 'staff' }, h('header', {}, h('span', { class: 'label' }, 'Staff')), h('div', { class: 'in' }, loading('Staff…')));
   let busy = false;
   let pannello = null;       // { email, tipo: 'aggiungi' | 'conferma' | 'giorni' }
 
   async function carica() {
-    try { disegna(await api('staff.evento', { evento_id: ev.id })); }
+    try { disegna(await caricaLista(ev.id)); }
     catch (e) { card.replaceChildren(h('header', {}, h('span', { class: 'label' }, 'Staff')), h('div', { class: 'in' }, h('div', { class: 'banner' }, e.message))); }
-  }
-
-  /** Dopo una modifica si rilegge l'evento: giornate, nomi e conflitti si aggiornano ovunque. */
-  async function aggiornaTutto() {
-    try {
-      const upd = await api('eventi.get', { id: ev.id });
-      upsertEvent(upd); refreshList();
-      if (onChange) onChange(upd);
-    } catch { /* la lista si aggiorna alla prossima apertura */ }
   }
 
   async function agisci(azione, email, giorni) {
     if (busy) return;
     busy = true;
+    card.classList.add('busy');          // risposta immediata al clic: la scheda si attenua e non accetta altri clic
+    card.setAttribute('aria-busy', 'true');
     try {
       const payload = { evento_id: ev.id, azione, email };
       if (giorni) payload.giorni = giorni;
-      await api('staff.gestisci', payload);
+      // una sola chiamata: il server risponde con lista dello staff ed evento aggiornato
+      const { evento, ...lista } = await api('staff.gestisci', payload);
       pannello = null;
-      await aggiornaTutto();
-      if (!onChange) await carica();
+      if (evento) {
+        upsertEvent(evento); refreshList();
+        if (onChange) onChange(evento, { staff: lista }); else disegna(lista);
+      } else if (onChange) {
+        // server più vecchio: si rilegge l'evento
+        const upd = await api('eventi.get', { id: ev.id });
+        upsertEvent(upd); refreshList(); onChange(upd);
+      } else disegna(lista);
     } catch (e) { toast(e.message, 'err'); }
+    card.classList.remove('busy'); card.removeAttribute('aria-busy');
     busy = false;
   }
 
@@ -99,7 +109,7 @@ export function staffCard(ev, onChange) {
             tipo === 'giorni' ? 'Salva giornate' : conf ? 'Assegna comunque' : 'Assegna'),
           conf && liberi.length && liberi.length < v.giorni.length
             ? h('button', { class: 'btn', type: 'button', onclick: () => agisci(tipo, email, liberi.map(g => g.giorno_id)) }, 'Assegna solo i giorni liberi') : null,
-          h('button', { class: 'btn ghost', type: 'button', onclick: () => { pannello = null; carica(); } }, 'Annulla'));
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => { pannello = null; disegna(s); } }, 'Annulla'));
       }
       const tuttiScelti = (scelti) => scelti.length === v.giorni.length ? undefined : scelti.map(g => g.giorno_id);
 
@@ -163,6 +173,6 @@ export function staffCard(ev, onChange) {
         h('div', { class: 'staff-add' }, sel, h('span', { class: 'help' }, 'Le assegnazioni confermate o manuali non cambiano quando il calendario cambia.'))));
   }
 
-  carica();
+  if (preload) disegna(preload); else carica();
   return card;
 }

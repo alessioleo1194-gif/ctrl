@@ -7,6 +7,7 @@ import { staffNomi } from '../persone.js';
 /** Lista eventi: prossimi o passati, ricerca, raggruppati per mese. */
 export function renderList(pane, selectedId) {
   const t = today();
+  let selId = selectedId;
   const listBox = h('div', { role: 'list' });
 
   function filtered() {
@@ -59,7 +60,7 @@ export function renderList(pane, selectedId) {
       : null;
     return h('button', {
       class: 'ev' + (e.stato === 'annullato' ? ' annullato' : '') + (finito ? ' passato' : ''),
-      role: 'listitem', 'aria-current': e.id === selectedId ? 'true' : null, 'data-giorno': g ? g.data : null,
+      role: 'listitem', 'aria-current': e.id === selId ? 'true' : null, 'data-id': e.id, 'data-giorno': g ? g.data : null,
       onclick: () => navigate('#/e/' + e.id)
     },
     h('span', { class: 'bar', style: { background: e.colore } }),
@@ -112,7 +113,13 @@ export function renderList(pane, selectedId) {
       draw();
     } }, f === 'prossimi' ? 'Prossimi' : 'Passati')));
 
-  const search = h('input', { class: 'input', type: 'search', placeholder: 'Cerca evento o luogo', value: store.q, 'aria-label': 'Cerca', oninput: (e) => { store.q = e.target.value; draw(); } });
+  // la ricerca ridisegna la lista una volta sola quando ci si ferma un istante, non a ogni lettera
+  let attesa = 0;
+  const search = h('input', { class: 'input', type: 'search', placeholder: 'Cerca evento o luogo', value: store.q, 'aria-label': 'Cerca', oninput: (e) => {
+    store.q = e.target.value;
+    clearTimeout(attesa);
+    attesa = setTimeout(draw, 90);
+  } });
 
   const mine = h('button', { class: 'chip-t', type: 'button', 'aria-pressed': String(!!store.mine), title: 'Mostra solo gli eventi a cui sei assegnato', onclick: (ev) => {
     store.mine = !store.mine;
@@ -128,6 +135,19 @@ export function renderList(pane, selectedId) {
 
   pane.replaceChildren(head, listBox);
   draw();
+  // agganci per cambiare selezione o ridisegnare le righe senza ricostruire la lista (e senza perdere ricerca e scorrimento)
+  pane.seleziona = (id) => { selId = id; marca(); };
+  pane.ridisegna = () => { clearTimeout(attesa); draw(); };
+  function marca() {
+    listBox.querySelectorAll('[aria-current]').forEach(el => el.removeAttribute('aria-current'));
+    if (!selId) return;
+    listBox.querySelectorAll('.ev').forEach(el => { if (el.dataset.id === selId) el.setAttribute('aria-current', 'true'); });
+  }
   const cur = listBox.querySelector('[aria-current="true"]');
   if (cur) cur.scrollIntoView({ block: 'nearest' });
+}
+
+/** Evidenzia nella lista l'evento aperto, senza ridisegnarla. */
+export function segnaSelezionato(pane, id) {
+  if (pane.seleziona) pane.seleziona(id || null);
 }

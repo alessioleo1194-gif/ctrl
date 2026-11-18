@@ -6,7 +6,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.12.1';
+var CTRL_VERSION = '0.13.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {

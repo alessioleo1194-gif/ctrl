@@ -1,5 +1,27 @@
 # Registro delle modifiche
 
+## 0.13.0 · Prestazioni: avvio in una chiamata, eventi che si aprono subito, cache dell'interfaccia (anteprima su TEST)
+
+Causa principale: ogni chiamata ad Apps Script costa **1,2–1,9 s anche quando non fa quasi nulla** (misurato sul server di test), e l'app ne faceva molte **in fila**
+e **bloccando lo schermo**. Nessuna funzione, regola, ruolo o dato è cambiato.
+
+- **Avvio**: prima 3 chiamate una dopo l'altra (profilo → impostazioni → eventi), ora 1 (`app.avvio`). Se il server è una versione precedente, l'app ripiega sulle chiamate separate.
+- **Apertura di un evento**: appare subito dai dati già in memoria (titolo, giornate, staff, note, documenti collegati); documenti, file e storico si riempiono quando arriva la risposta del server, che
+  riallinea anche il resto. Se nel frattempo stai scrivendo una nota non viene mai ridisegnato sotto le mani. Un evento non più disponibile mostra lo stesso avviso di prima.
+- **Cambio evento senza ricostruire la schermata**: la lista, la ricerca, i filtri e la posizione di scorrimento restano; cambia solo il dettaglio. Su telefono, tornando all'elenco si ritorna dove eri.
+- **Elenco sempre aggiornato**: l'elenco in memoria si rilegge in background se ha più di 45 secondi e si ridisegna solo se qualcosa è cambiato (prima non si aggiornava mai nella stessa sessione).
+- **Staff e turni**: assegnare, confermare, togliere, cambiare giornate o salvare un turno erano 3 chiamate in fila (modifica → rilettura evento → rilettura staff); ora è 1, perché `staff.gestisci` e `turni.salva`
+  rispondono anche con l'evento aggiornato (campo `evento`, la lista dello staff resta com'era). La scheda si attenua subito al clic (feedback immediato) e non accetta doppi clic.
+- **Backend**: la cache delle tabelle si svuota prima dell'autenticazione e non dopo: si evita una seconda lettura del foglio `utenti` in ogni richiesta (1 lettura in meno per chiamata).
+- **Caricamento iniziale**: moduli dell'avvio 32 → 16 (210 → 97 KB); Impostazioni, Report, Production Plan e Material List si caricano solo quando le apri. I moduli dell'avvio si scaricano
+  in parallelo (`modulepreload`). Il service worker ora serve tutti i file dell'interfaccia dalla memoria del dispositivo (prima ne riscaricava/rivalidava una cinquantina a ogni apertura).
+  **Attenzione**: i file restano in cache finché `VERSION` in `app/sw.js` non cambia; il nuovo test controlla che l'elenco sia completo.
+- **Impostazioni**: il Registro accessi (la tabella più grande) si carica dopo che la pagina è già visibile.
+- **Ricerca**: la lista si ridisegna una volta sola quando ci si ferma un istante, non a ogni lettera.
+- **Correzione collaterale**: l'indicatore dei file nella lista si aggiorna anche quando evento aperto ed evento dell'elenco sono lo stesso oggetto (con test già esistente).
+- Test: 6 backend (`prestazioni.test.mjs`), 5 unit (`sw.test.mjs`), 8 e2e desktop+telefono (`prestazioni.spec.mjs`, con server finto lento). Misura delle letture dei fogli: `node scripts/perf-mock.mjs`.
+- Apps Script: nuova versione del deployment (schema invariato, setup non necessario). Il frontend resta compatibile con il server 0.12.1 (ripiega sulle chiamate separate).
+
 ## 0.12.1 · Load-in/Load-out nell'anteprima e striscia tra una giornata e l'altra (anteprima su TEST)
 
 - **Elenco eventi**: nel riquadro dell'evento compaiono subito **Load-in** (bordo verde) e **Load-out** (bordo arancione), letti dal Production Plan giornata per giornata.

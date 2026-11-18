@@ -324,7 +324,10 @@ var Staff = (function () {
         scrivi({ stato: 'proposta', trovato: trovati[email].trovato, termine: trovati[email].termine }, riga.stato);
       }
     });
-    return lista(actor, { evento_id: e.id });
+    // la risposta porta anche l'evento aggiornato: il frontend non deve rileggerlo con una seconda chiamata
+    var out = lista(actor, { evento_id: e.id });
+    out.evento = Events.get(actor, { id: e.id });
+    return out;
   }
 
   return {
