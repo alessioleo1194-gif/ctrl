@@ -72,6 +72,19 @@ var Util = (function () {
     return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
   }
 
+  /** Numero progressivo del giorno (yyyy-MM-dd): serve a confrontare orari su giorni diversi. */
+  function dayNum(isoDate) {
+    var p = isoDate.split('-');
+    return Math.round(Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000);
+  }
+
+  /** Minuti dalla mezzanotte di "HH:MM"; null se vuoto. */
+  function minuti(t) {
+    if (!t) return null;
+    var p = String(t).split(':');
+    return (+p[0]) * 60 + (+p[1]);
+  }
+
   function isEmail(s) {
     return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
   }
@@ -124,7 +137,7 @@ var Util = (function () {
 
   return {
     newId: newId, newToken: newToken, newCode: newCode, sha256: sha256,
-    nowIso: nowIso, fmtDate: fmtDate, fmtTime: fmtTime, addDays: addDays, today: today, diffDays: diffDays,
+    nowIso: nowIso, fmtDate: fmtDate, fmtTime: fmtTime, addDays: addDays, today: today, diffDays: diffDays, dayNum: dayNum, minuti: minuti,
     isEmail: isEmail, normEmail: normEmail, isDate: isDate, isTime: isTime, isColor: isColor,
     text: text, stripHtml: stripHtml, bool: bool
   };

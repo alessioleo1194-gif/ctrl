@@ -76,6 +76,14 @@ le proposte (`Staff.ricalcola_`) senza toccare conferme, assegnazioni manuali e 
 Owner sempre; gli altri se assegnati all'evento o a un evento della stessa produzione (festival). Ogni utente ha un colore
 (`utenti.colore`, tavolozza `COLORI_UTENTE`), lo stesso su card, dettaglio e impostazioni.
 
+Giornate e turni (`25_Giorni.js`, `26_Turni.js`, tabelle `giorni` e `turni`): ogni evento ha una riga per data. `Giorni.riallinea`
+(dopo sync, creazione e modifica evento) le ricostruisce dalle date del Calendar senza mai toccare orari `manuali`: se il Calendar cambia dopo
+una correzione a mano (`cal_base` ≠ `cal_inizio|cal_fine`) la giornata risulta in differenza (`diff`) finché l'utente sceglie (`giorni.calendario`).
+Le giornate non si cancellano (`eliminato`); una giornata tolta a mano non ritorna con la sync. Fine ≤ inizio = giorno dopo (intervalli in minuti assoluti,
+`Giorni.intervallo`). Un turno è una riga per tecnico e giornata, creato dalle assegnazioni confermate (`assegnazioni.giorni_tutti`); orari vuoti = come la giornata.
+`Turni.analizza` confronta i turni della stessa persona su eventi non annullati: sovrapposizione / da_verificare / stesso_giorno. Solo l'Owner vede orari dei
+turni, email e conflitti. I turni sono anche la base dello Staff Work Report (nessun archivio a parte).
+
 ## Attività automatiche (trigger Apps Script)
 
 | Funzione | Quando | Cosa fa |

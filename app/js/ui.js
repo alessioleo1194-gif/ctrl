@@ -43,6 +43,7 @@ const PATHS = {
   download: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
   warn: '<path d="M12 3l10 18H2zM12 10v5M12 18v.5"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
 };
 

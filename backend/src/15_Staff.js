@@ -224,7 +224,7 @@ var Staff = (function () {
     return e;
   }
 
-  /** Staff di un evento per la scheda "Staff" (solo OWNER). */
+  /** Staff di un evento per la scheda "Staff" (solo OWNER): persone, loro turni per giornata e disponibilità dei candidati. */
   function lista(actor, p) {
     Users.require(actor, 'impostazioni');
     var e = evento_(p && p.evento_id);
@@ -232,19 +232,39 @@ var Staff = (function () {
     Db.all('utenti').forEach(function (u) { utenti[Util.normEmail(u.email)] = u; });
     var righe = Db.all('assegnazioni').filter(function (r) { return r.evento_id === e.id; })
       .sort(function (a, b) { return a.creata_il < b.creata_il ? -1 : 1; });
+    var analisi = Turni.analizza();
     var per = function (stato) {
       return righe.filter(function (r) { return r.stato === stato; }).map(function (r) { return vistaPersona(r, utenti[r.email]); });
     };
     var assegnati = per('confermata');
     var presi = {};
-    assegnati.forEach(function (a) { presi[a.email] = true; });
-    var candidati = utentiAttivi().filter(function (u) { return !presi[Util.normEmail(u.email)]; })
-      .map(function (u) { return { email: u.email, nome: u.nome || u.email, ruolo: Users.ruoloDi(u), colore: Users.coloreDi(u) }; })
+    assegnati.forEach(function (a, i) {
+      presi[a.email] = true;
+      var riga = righe.filter(function (r) { return r.stato === 'confermata' && r.email === a.email; })[0];
+      a.giorni_tutti = !riga || riga.giorni_tutti !== 'FALSE';
+      a.turni = Turni.perPersona(e, a.email, analisi);
+      a.livello = null;
+      a.turni.forEach(function (t) { if (t.livello && (!a.livello || Turni.RANGO[t.livello] > Turni.RANGO[a.livello])) a.livello = t.livello; });
+    });
+    var liberi = utentiAttivi().filter(function (u) { return !presi[Util.normEmail(u.email)]; });
+    var disp = Turni.perCandidati(e, liberi.map(function (u) { return Util.normEmail(u.email); }), analisi.tutti);
+    var candidati = liberi
+      .map(function (u) {
+        var d = disp[Util.normEmail(u.email)] || { livello: null, giorni: [] };
+        return { email: u.email, nome: u.nome || u.email, ruolo: Users.ruoloDi(u), colore: Users.coloreDi(u), livello: d.livello, giorni: d.giorni };
+      })
       .sort(function (a, b) { return a.nome.toLowerCase() < b.nome.toLowerCase() ? -1 : 1; });
-    return { evento_id: e.id, assegnati: assegnati, proposte: per('proposta'), scartate: per('scartata'), candidati: candidati };
+    var giorni = Giorni.attive(e.id).map(function (g, i, tutti) {
+      return { id: g.id, n: i + 1, di: tutti.length, data: g.data, ora_inizio: g.ora_inizio, ora_fine: g.ora_fine, dopo_mezzanotte: Giorni.dopoMezzanotte(g.ora_inizio, g.ora_fine) };
+    });
+    // le proposte dal Calendar si confermano su tutte le giornate: anche per loro si dice se la persona è libera
+    var propEmails = righe.filter(function (r) { return r.stato === 'proposta'; }).map(function (r) { return r.email; });
+    var dispProp = Turni.perCandidati(e, propEmails, analisi.tutti);
+    var proposte = per('proposta').map(function (x) { var d = dispProp[x.email]; x.livello = d ? d.livello : null; return x; });
+    return { evento_id: e.id, giorni: giorni, assegnati: assegnati, proposte: proposte, scartate: per('scartata'), candidati: candidati };
   }
 
-  var AZIONI = ['conferma', 'scarta', 'rimuovi', 'ripristina', 'aggiungi'];
+  var AZIONI = ['conferma', 'scarta', 'rimuovi', 'ripristina', 'aggiungi', 'giorni'];
 
   function gestisci(actor, p) {
     Users.require(actor, 'impostazioni');
@@ -254,6 +274,8 @@ var Staff = (function () {
     var email = Util.normEmail(p.email);
     if (!Util.isEmail(email)) throw new CtrlError('INVALID', 'Email non valida');
     var e = evento_(p.evento_id);
+    // le giornate scelte si controllano prima di scrivere qualsiasi cosa
+    var giorni = Turni.normalizzaGiorni(e, azione === 'aggiungi' || azione === 'conferma' || azione === 'giorni' ? p.giorni : undefined);
     Db.withLock(function () {
       var riga = (perEvento()[e.id] || {})[email] || null;
       var u = Db.find('utenti', 'email', email);
@@ -269,15 +291,24 @@ var Staff = (function () {
         if (riga) scrivi({ stato: 'confermata', origine: 'manuale' }, riga.stato);
         else {
           Db.insert('assegnazioni', { id: Util.newId('as'), evento_id: e.id, email: email, stato: 'confermata', origine: 'manuale',
-            creata_il: stamp, creata_da: actor.email, aggiornata_il: stamp, aggiornata_da: actor.email });
+            creata_il: stamp, creata_da: actor.email, aggiornata_il: stamp, aggiornata_da: actor.email, giorni_tutti: 'TRUE' });
           Storico.log(actor.email, e.id, 'staff', 'aggiungi', email, '', 'confermata');
         }
+        Turni.imposta_(e, email, giorni, actor.email);
+        Storico.log(actor.email, e.id, 'staff', 'giornate', email, '', giorni ? giorni.length + ' giornate' : 'tutte');
         return;
       }
       if (!riga) throw new CtrlError('NOT_FOUND', 'Assegnazione non trovata');
+      if (azione === 'giorni') {
+        if (riga.stato !== 'confermata') throw new CtrlError('CONFLICT', 'La persona non è assegnata');
+        Turni.imposta_(e, email, giorni, actor.email);
+        Storico.log(actor.email, e.id, 'staff', 'giornate', email, '', giorni ? giorni.length + ' giornate' : 'tutte');
+        return;
+      }
       if (azione === 'conferma') {
         if (riga.stato !== 'proposta') throw new CtrlError('CONFLICT', 'La proposta non è più in attesa');
         scrivi({ stato: 'confermata' }, riga.stato);
+        Turni.imposta_(e, email, giorni, actor.email);
       } else if (azione === 'scarta') {
         if (riga.stato !== 'proposta') throw new CtrlError('CONFLICT', 'La proposta non è più in attesa');
         scrivi({ stato: 'scartata' }, riga.stato);
@@ -285,6 +316,7 @@ var Staff = (function () {
         if (riga.stato !== 'confermata') throw new CtrlError('CONFLICT', 'La persona non è assegnata');
         // se veniva dal Calendar si ricorda che non era lei, altrimenti la prossima sync la riproporrebbe
         scrivi({ stato: riga.origine === 'calendario' ? 'scartata' : 'rimossa' }, riga.stato);
+        Turni.togli(e.id, email, actor.email);
       } else if (azione === 'ripristina') {
         if (riga.stato !== 'scartata') throw new CtrlError('CONFLICT', 'Niente da ripristinare');
         var trovati = u ? trovaNomi(e, [u]) : {};
@@ -298,6 +330,6 @@ var Staff = (function () {
   return {
     ricalcola_: ricalcola_, ricalcolaSicuro_: ricalcolaSicuro_, contesto: contesto, puoAccedere: puoAccedere, puoVedere: puoVedere,
     richiediEvento: richiediEvento, richiediProduzione: richiediProduzione, perLista: perLista,
-    lista: lista, gestisci: gestisci, alias: alias, MSG: MSG
+    lista: lista, gestisci: gestisci, alias: alias, nomeDi: nomeDi, MSG: MSG
   };
 })();

@@ -89,6 +89,7 @@ function setup_(env) {
   migraRuoli_(log);
   migraColori_(log);
   migraNomeOwner_(log);
+  migraGiorni_(log);
   if (!Settings.getRaw('schema_versione')) Settings.setRaw('schema_versione', String(SCHEMA_VERSION));
 
   installTriggers_();
@@ -183,4 +184,17 @@ function migraNomeOwner_(log) {
   if (nome === String(u.nome || '').trim()) return;
   Db.update('utenti', 'email', u.email, { nome: nome, aggiornato_il: Util.nowIso() }, null, true);
   log.push('Nome del proprietario: ' + nome);
+}
+
+/**
+ * Dalla 0.11.0 ogni evento ha le sue giornate e ogni assegnazione confermata i suoi turni. Per gli eventi già presenti
+ * si creano le giornate dalle date del Calendar e un turno per ogni persona già assegnata. Non modifica né toglie nulla:
+ * idempotente, rieseguirla non cambia niente.
+ */
+function migraGiorni_(log) {
+  Db.clearCache();
+  var prima = Db.all('giorni').length, turniPrima = Db.all('turni').length;
+  Db.withLock(function () { Turni.riallineaTutti('setup'); });
+  var g = Db.all('giorni').length - prima, t = Db.all('turni').length - turniPrima;
+  if (g || t) log.push('Giornate create: ' + g + ' · turni creati: ' + t);
 }

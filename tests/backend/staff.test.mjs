@@ -392,7 +392,7 @@ test('migrazione: setup dà un colore a chi non lo ha e un secondo setup non lo 
 
 test('schema: tabella assegnazioni e colonne nuove create dal setup', () => {
   const env = boot([]);
-  assert.deepEqual(grezze(env, 'assegnazioni')[0], ['id', 'evento_id', 'email', 'stato', 'origine', 'trovato', 'termine', 'creata_il', 'creata_da', 'aggiornata_il', 'aggiornata_da']);
+  assert.deepEqual(grezze(env, 'assegnazioni')[0], ['id', 'evento_id', 'email', 'stato', 'origine', 'trovato', 'termine', 'creata_il', 'creata_da', 'aggiornata_il', 'aggiornata_da', 'giorni_tutti']);
   const head = grezze(env, 'utenti')[0];
   assert.ok(head.includes('nome_calendario') && head.includes('colore'));
   assert.equal(ok(call(env.ctx, 'impostazioni.get', {}, env.token)).sync !== undefined, true);

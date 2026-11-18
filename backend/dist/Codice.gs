@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.10.1
+ * CTRL API · versione 0.11.0
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.10.1';
+var CTRL_VERSION = '0.11.0';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -123,6 +123,19 @@ var Util = (function () {
     return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
   }
 
+  /** Numero progressivo del giorno (yyyy-MM-dd): serve a confrontare orari su giorni diversi. */
+  function dayNum(isoDate) {
+    var p = isoDate.split('-');
+    return Math.round(Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000);
+  }
+
+  /** Minuti dalla mezzanotte di "HH:MM"; null se vuoto. */
+  function minuti(t) {
+    if (!t) return null;
+    var p = String(t).split(':');
+    return (+p[0]) * 60 + (+p[1]);
+  }
+
   function isEmail(s) {
     return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
   }
@@ -175,7 +188,7 @@ var Util = (function () {
 
   return {
     newId: newId, newToken: newToken, newCode: newCode, sha256: sha256,
-    nowIso: nowIso, fmtDate: fmtDate, fmtTime: fmtTime, addDays: addDays, today: today, diffDays: diffDays,
+    nowIso: nowIso, fmtDate: fmtDate, fmtTime: fmtTime, addDays: addDays, today: today, diffDays: diffDays, dayNum: dayNum, minuti: minuti,
     isEmail: isEmail, normEmail: normEmail, isDate: isDate, isTime: isTime, isColor: isColor,
     text: text, stripHtml: stripHtml, bool: bool
   };
@@ -190,7 +203,7 @@ var Util = (function () {
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 7;
+var SCHEMA_VERSION = 8;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -232,7 +245,19 @@ var SCHEMA = {
   // staff assegnato agli eventi. stato: proposta (da confermare), confermata, scartata, rimossa, decaduta.
   // origine: calendario (trovato nella descrizione) o manuale. trovato/termine: dove e cosa è stato trovato.
   assegnazioni: ['id', 'evento_id', 'email', 'stato', 'origine', 'trovato', 'termine', 'creata_il', 'creata_da',
-    'aggiornata_il', 'aggiornata_da'],
+    'aggiornata_il', 'aggiornata_da',
+    // giorni_tutti: TRUE = lavora in tutte le giornate dell'evento (anche quelle che nascono dopo); FALSE = solo i turni indicati
+    'giorni_tutti'],
+  // giornate di un evento: una riga per evento e data. Gli orari in vigore sono ora_inizio/ora_fine; cal_* è l'ultimo orario
+  // letto dal Calendar, cal_base quello che il Calendar diceva quando l'orario è stato corretto a mano ("inizio|fine").
+  // origine: calendario (nata dal Calendar) o manuale (aggiunta a mano). origine_orario: calendario o manuale.
+  // stato: attiva · fuori_calendario (non più nel Calendar ma con modifiche o staff). Fine prima dell'inizio = finisce il giorno dopo.
+  giorni: ['id', 'evento_id', 'data', 'ora_inizio', 'ora_fine', 'origine', 'origine_orario', 'cal_inizio', 'cal_fine', 'cal_base',
+    'nota', 'stato', 'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione'],
+  // turni: una riga per tecnico e per giornata (è anche lo Staff Work Report: nessun archivio a parte).
+  // ora_inizio/ora_fine vuoti = segue la giornata. Orari sempre pianificati. Nessuna riga si cancella: eliminato.
+  turni: ['id', 'evento_id', 'giorno_id', 'email', 'ora_inizio', 'ora_fine', 'nota', 'eliminato', 'creato_il', 'creato_da',
+    'aggiornato_il', 'aggiornato_da', 'versione'],
   sessioni: ['hash', 'email', 'creata', 'scade', 'ultimo_uso', 'dispositivo'],
   condivisioni: ['id', 'hash', 'eventi', 'sezioni', 'mostra_contatti', 'scade', 'revocato', 'creato_da',
     'creato_il', 'ultimo_accesso', 'etichetta'],
@@ -880,6 +905,7 @@ var Users = (function () {
         var lostAccess = before.attivo !== out.attivo && out.attivo === 'FALSE';
         var demoted = ruoloDi(before) !== ruoloDi(out);
         if (nuovaEmail) {
+          Turni.rinomina(email, nuovaEmail, actor.email);
           Db.all('assegnazioni').forEach(function (r) {
             if (r.email === email) Db.update('assegnazioni', 'id', r.id, { email: nuovaEmail, aggiornata_il: Util.nowIso(), aggiornata_da: actor.email });
           });
@@ -933,6 +959,8 @@ var Users = (function () {
         if (r.stato === 'confermata') { Db.update('assegnazioni', 'id', r.id, { stato: 'rimossa', aggiornata_il: ora, aggiornata_da: actor.email }); tolte++; }
         else if (r.stato === 'proposta') Db.update('assegnazioni', 'id', r.id, { stato: 'decaduta', aggiornata_il: ora, aggiornata_da: actor.email });
       });
+      // i turni futuri spariscono con l'assegnazione; le giornate già svolte restano nello storico
+      Turni.togliFuturi(email, actor.email);
       Storico.log(actor.email, '', 'utenti', 'elimina', email, { ruolo: ruoloDi(u), nome: u.nome }, '');
       Accessi.log(email, 'eliminato', 'ok', '', etichettaRuolo(ruoloDi(u)) + (tolte ? ' · tolto da ' + tolte + ' event' + (tolte === 1 ? 'o' : 'i') : ''), actor.email);
       Staff.ricalcolaSicuro_();
@@ -1444,7 +1472,7 @@ var Staff = (function () {
     return e;
   }
 
-  /** Staff di un evento per la scheda "Staff" (solo OWNER). */
+  /** Staff di un evento per la scheda "Staff" (solo OWNER): persone, loro turni per giornata e disponibilità dei candidati. */
   function lista(actor, p) {
     Users.require(actor, 'impostazioni');
     var e = evento_(p && p.evento_id);
@@ -1452,19 +1480,39 @@ var Staff = (function () {
     Db.all('utenti').forEach(function (u) { utenti[Util.normEmail(u.email)] = u; });
     var righe = Db.all('assegnazioni').filter(function (r) { return r.evento_id === e.id; })
       .sort(function (a, b) { return a.creata_il < b.creata_il ? -1 : 1; });
+    var analisi = Turni.analizza();
     var per = function (stato) {
       return righe.filter(function (r) { return r.stato === stato; }).map(function (r) { return vistaPersona(r, utenti[r.email]); });
     };
     var assegnati = per('confermata');
     var presi = {};
-    assegnati.forEach(function (a) { presi[a.email] = true; });
-    var candidati = utentiAttivi().filter(function (u) { return !presi[Util.normEmail(u.email)]; })
-      .map(function (u) { return { email: u.email, nome: u.nome || u.email, ruolo: Users.ruoloDi(u), colore: Users.coloreDi(u) }; })
+    assegnati.forEach(function (a, i) {
+      presi[a.email] = true;
+      var riga = righe.filter(function (r) { return r.stato === 'confermata' && r.email === a.email; })[0];
+      a.giorni_tutti = !riga || riga.giorni_tutti !== 'FALSE';
+      a.turni = Turni.perPersona(e, a.email, analisi);
+      a.livello = null;
+      a.turni.forEach(function (t) { if (t.livello && (!a.livello || Turni.RANGO[t.livello] > Turni.RANGO[a.livello])) a.livello = t.livello; });
+    });
+    var liberi = utentiAttivi().filter(function (u) { return !presi[Util.normEmail(u.email)]; });
+    var disp = Turni.perCandidati(e, liberi.map(function (u) { return Util.normEmail(u.email); }), analisi.tutti);
+    var candidati = liberi
+      .map(function (u) {
+        var d = disp[Util.normEmail(u.email)] || { livello: null, giorni: [] };
+        return { email: u.email, nome: u.nome || u.email, ruolo: Users.ruoloDi(u), colore: Users.coloreDi(u), livello: d.livello, giorni: d.giorni };
+      })
       .sort(function (a, b) { return a.nome.toLowerCase() < b.nome.toLowerCase() ? -1 : 1; });
-    return { evento_id: e.id, assegnati: assegnati, proposte: per('proposta'), scartate: per('scartata'), candidati: candidati };
+    var giorni = Giorni.attive(e.id).map(function (g, i, tutti) {
+      return { id: g.id, n: i + 1, di: tutti.length, data: g.data, ora_inizio: g.ora_inizio, ora_fine: g.ora_fine, dopo_mezzanotte: Giorni.dopoMezzanotte(g.ora_inizio, g.ora_fine) };
+    });
+    // le proposte dal Calendar si confermano su tutte le giornate: anche per loro si dice se la persona è libera
+    var propEmails = righe.filter(function (r) { return r.stato === 'proposta'; }).map(function (r) { return r.email; });
+    var dispProp = Turni.perCandidati(e, propEmails, analisi.tutti);
+    var proposte = per('proposta').map(function (x) { var d = dispProp[x.email]; x.livello = d ? d.livello : null; return x; });
+    return { evento_id: e.id, giorni: giorni, assegnati: assegnati, proposte: proposte, scartate: per('scartata'), candidati: candidati };
   }
 
-  var AZIONI = ['conferma', 'scarta', 'rimuovi', 'ripristina', 'aggiungi'];
+  var AZIONI = ['conferma', 'scarta', 'rimuovi', 'ripristina', 'aggiungi', 'giorni'];
 
   function gestisci(actor, p) {
     Users.require(actor, 'impostazioni');
@@ -1474,6 +1522,8 @@ var Staff = (function () {
     var email = Util.normEmail(p.email);
     if (!Util.isEmail(email)) throw new CtrlError('INVALID', 'Email non valida');
     var e = evento_(p.evento_id);
+    // le giornate scelte si controllano prima di scrivere qualsiasi cosa
+    var giorni = Turni.normalizzaGiorni(e, azione === 'aggiungi' || azione === 'conferma' || azione === 'giorni' ? p.giorni : undefined);
     Db.withLock(function () {
       var riga = (perEvento()[e.id] || {})[email] || null;
       var u = Db.find('utenti', 'email', email);
@@ -1489,15 +1539,24 @@ var Staff = (function () {
         if (riga) scrivi({ stato: 'confermata', origine: 'manuale' }, riga.stato);
         else {
           Db.insert('assegnazioni', { id: Util.newId('as'), evento_id: e.id, email: email, stato: 'confermata', origine: 'manuale',
-            creata_il: stamp, creata_da: actor.email, aggiornata_il: stamp, aggiornata_da: actor.email });
+            creata_il: stamp, creata_da: actor.email, aggiornata_il: stamp, aggiornata_da: actor.email, giorni_tutti: 'TRUE' });
           Storico.log(actor.email, e.id, 'staff', 'aggiungi', email, '', 'confermata');
         }
+        Turni.imposta_(e, email, giorni, actor.email);
+        Storico.log(actor.email, e.id, 'staff', 'giornate', email, '', giorni ? giorni.length + ' giornate' : 'tutte');
         return;
       }
       if (!riga) throw new CtrlError('NOT_FOUND', 'Assegnazione non trovata');
+      if (azione === 'giorni') {
+        if (riga.stato !== 'confermata') throw new CtrlError('CONFLICT', 'La persona non è assegnata');
+        Turni.imposta_(e, email, giorni, actor.email);
+        Storico.log(actor.email, e.id, 'staff', 'giornate', email, '', giorni ? giorni.length + ' giornate' : 'tutte');
+        return;
+      }
       if (azione === 'conferma') {
         if (riga.stato !== 'proposta') throw new CtrlError('CONFLICT', 'La proposta non è più in attesa');
         scrivi({ stato: 'confermata' }, riga.stato);
+        Turni.imposta_(e, email, giorni, actor.email);
       } else if (azione === 'scarta') {
         if (riga.stato !== 'proposta') throw new CtrlError('CONFLICT', 'La proposta non è più in attesa');
         scrivi({ stato: 'scartata' }, riga.stato);
@@ -1505,6 +1564,7 @@ var Staff = (function () {
         if (riga.stato !== 'confermata') throw new CtrlError('CONFLICT', 'La persona non è assegnata');
         // se veniva dal Calendar si ricorda che non era lei, altrimenti la prossima sync la riproporrebbe
         scrivi({ stato: riga.origine === 'calendario' ? 'scartata' : 'rimossa' }, riga.stato);
+        Turni.togli(e.id, email, actor.email);
       } else if (azione === 'ripristina') {
         if (riga.stato !== 'scartata') throw new CtrlError('CONFLICT', 'Niente da ripristinare');
         var trovati = u ? trovaNomi(e, [u]) : {};
@@ -1518,7 +1578,7 @@ var Staff = (function () {
   return {
     ricalcola_: ricalcola_, ricalcolaSicuro_: ricalcolaSicuro_, contesto: contesto, puoAccedere: puoAccedere, puoVedere: puoVedere,
     richiediEvento: richiediEvento, richiediProduzione: richiediProduzione, perLista: perLista,
-    lista: lista, gestisci: gestisci, alias: alias, MSG: MSG
+    lista: lista, gestisci: gestisci, alias: alias, nomeDi: nomeDi, MSG: MSG
   };
 })();
 
@@ -1545,7 +1605,7 @@ var Events = (function () {
     return out;
   }
 
-  function view(e, conteggi, user, st) {
+  function view(e, conteggi, user, st, gi) {
     var c = conteggi[e.id] || { piano: 0, materiale: 0, scheda: 0 };
     var accesso = st.accesso(e);
     var v = {
@@ -1556,6 +1616,8 @@ var Events = (function () {
       stato_doc: { piano: c.piano > 0, materiale: c.materiale > 0, scheda: c.scheda > 0 },
       staff: st.staff(e.id), mio: st.mio(e.id), accesso: accesso, da_confermare: st.daConfermare(e.id)
     };
+    v.giorni = gi.di(e);
+    if (user && Users.can(user, 'admin')) v.conflitti = gi.conflitti(e.id);
     if (user && Users.can(user, 'admin') && e.cartella_id) v.cartella_url = 'https://drive.google.com/drive/folders/' + e.cartella_id;
     return v;
   }
@@ -1563,11 +1625,12 @@ var Events = (function () {
   function list(user, p) {
     var conteggi = contaSezioni();
     var st = Staff.perLista(user);
+    var gi = Giorni.perLista(user, st);
     var includiArchiviati = !!(p && p.archiviati);
     return Db.all('eventi')
       .filter(function (e) { return includiArchiviati || e.stato !== 'archiviato'; })
       .filter(function (e) { return st.vede(e); })
-      .map(function (e) { return view(e, conteggi, user, st); })
+      .map(function (e) { return view(e, conteggi, user, st, gi); })
       .sort(function (a, b) {
         var ka = a.data + (a.ora_inizio || '99:99') + a.titolo;
         var kb = b.data + (b.ora_inizio || '99:99') + b.titolo;
@@ -1581,7 +1644,7 @@ var Events = (function () {
     var st = Staff.perLista(user);
     // chi non può vedere l'evento riceve la stessa risposta di un evento che non esiste
     if (!st.vede(e)) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
-    var out = view(e, contaSezioni(), user, st);
+    var out = view(e, contaSezioni(), user, st, Giorni.perLista(user, st));
     // chi non è nello staff vede l'evento ma non file, documenti e note
     out.allegati = out.accesso ? Allegati.perEvento(e.id) : null;
     out.produzione = out.accesso && e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;
@@ -1636,6 +1699,7 @@ var Events = (function () {
       f.versione = '1';
       var row = Db.insert('eventi', f);
       Storico.log(user.email, row.id, 'evento', 'crea', row.id, '', { titolo: row.titolo, data: row.data });
+      Giorni.riallinea(row, user.email);
       Staff.ricalcolaSicuro_();
       return get(user, { id: row.id });
     });
@@ -1669,6 +1733,8 @@ var Events = (function () {
       var row = Db.update('eventi', 'id', p.id, patch, p.versione);
       var d = Storico.diff(before, row, CAL_FIELDS.concat(['note']));
       if (d.changed) Storico.log(user.email, row.id, 'evento', 'modifica', row.id, d.prima, d.dopo);
+      // date o orari cambiati: le giornate (e i turni di chi lavora su tutte) seguono
+      if (fieldsChanged.length) { Giorni.riallinea(row, user.email); Turni.riallinea(row, user.email); }
       if (patch.descrizione !== undefined) Staff.ricalcolaSicuro_();
       return get(user, { id: row.id });
     });
@@ -1781,22 +1847,28 @@ var CalendarSync = (function () {
           f.aggiornato_il = stamp; f.aggiornato_da = 'calendar';
           f.versione = '1';
           f.sync_il = stamp;
-          Db.insert('eventi', f);
+          var nuovo = Db.insert('eventi', f);
+          Giorni.riallinea(nuovo, 'calendar');
           res.creati++;
           return;
         }
         var patch = {};
         Events.CAL_FIELDS.forEach(function (k) { if ((row[k] || '') !== (f[k] || '')) patch[k] = f[k]; });
+        var rigaFinale = row;
         var reactivate = row.stato === 'annullato';
         if (reactivate) patch.stato = 'attivo';
         if (Object.keys(patch).length) {
           var before = JSON.parse(JSON.stringify(row));
           patch.aggiornato_il = stamp; patch.aggiornato_da = 'calendar'; patch.sync_il = stamp;
           var after = Db.update('eventi', 'id', row.id, patch);
+          rigaFinale = after;
           var d = Storico.diff(before, after, Events.CAL_FIELDS.concat(['stato']));
           if (d.changed) Storico.log('calendar', row.id, 'evento', reactivate ? 'riattivato' : 'sync', row.id, d.prima, d.dopo);
           if (reactivate) res.riattivati++; else res.aggiornati++;
         }
+        // giornate e turni seguono le date del Calendar (gli orari corretti a mano restano, con la segnalazione)
+        if (Giorni.riallinea(rigaFinale, 'calendar')) res.giornate = (res.giornate || 0) + 1;
+        Turni.riallinea(rigaFinale, 'calendar');
       });
 
       Object.keys(byKey).forEach(function (key) {
@@ -2273,6 +2345,701 @@ var Documenti = (function () {
   } };
 })();
 
+// ===== 25_Giorni.js =====
+/**
+ * CTRL · Giornate degli eventi.
+ *
+ * Ogni evento ha una o più giornate (tabella `giorni`), una per data. Le giornate nascono dal Calendar
+ * (o dalle date di un evento manuale) e si possono correggere in CTRL: orari e nota per giornata.
+ *
+ * - Orario in vigore = ora_inizio / ora_fine. Origine dell'orario: "calendario" (segue il Calendar) o "manuale".
+ * - Se un orario corretto a mano non coincide più con quello del Calendar, si segnala la differenza (diff):
+ *   l'Owner o Production sceglie se tenere il proprio orario o usare quello nuovo del Calendar. Mai sovrascritto in silenzio.
+ * - Fine prima dell'inizio = la giornata finisce dopo la mezzanotte (il giorno dopo).
+ * - Evento di un solo giorno con orario a cavallo della mezzanotte = una sola giornata.
+ * - Evento su più giorni: il primo giorno prende l'inizio, l'ultimo la fine, gli altri orari restano "da definire".
+ * - Le giornate non si cancellano: `eliminato`. Una giornata tolta a mano non ritorna con la sincronizzazione.
+ */
+var Giorni = (function () {
+  var MAX_GIORNI = 60;
+
+  /** Giornate previste dalle date/orari dell'evento (Calendar o manuale). */
+  function calGiorni(e) {
+    var d0 = e.data, d1 = e.data_fine || e.data;
+    if (!Util.isDate(d0)) return [];
+    if (!Util.isDate(d1) || d1 < d0) d1 = d0;
+    var n = Util.diffDays(d0, d1) + 1;
+    var a = e.ora_inizio || '', b = e.ora_fine || '';
+    // un solo evento a cavallo della mezzanotte (22:00 → 02:00 del giorno dopo) è una giornata
+    if (n === 2 && a && b && Util.minuti(b) <= Util.minuti(a)) n = 1;
+    if (n > MAX_GIORNI) n = MAX_GIORNI;
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      out.push({
+        data: Util.addDays(d0, i),
+        ora_inizio: n === 1 ? a : (i === 0 ? a : ''),
+        ora_fine: n === 1 ? b : (i === n - 1 ? b : '')
+      });
+    }
+    return out;
+  }
+
+  /** Intervallo in minuti assoluti (dal 1970) o null se manca un orario. Fine <= inizio = il giorno dopo. */
+  function intervallo(data, inizio, fine) {
+    var s = Util.minuti(inizio), e = Util.minuti(fine);
+    if (s === null || e === null || !Util.isDate(data)) return null;
+    var base = Util.dayNum(data) * 1440;
+    return { s: base + s, e: base + e + (e <= s ? 1440 : 0) };
+  }
+
+  function dopoMezzanotte(inizio, fine) {
+    var s = Util.minuti(inizio), e = Util.minuti(fine);
+    return s !== null && e !== null && e <= s;
+  }
+
+  function attivo(r) { return !Util.bool(r.eliminato); }
+
+  function righeEvento(eventoId) {
+    return Db.all('giorni').filter(function (r) { return r.evento_id === eventoId; });
+  }
+
+  /** Giornate attive di un evento, in ordine di data. */
+  function attive(eventoId) {
+    return righeEvento(eventoId).filter(attivo).sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : 0; });
+  }
+
+  function haTurni(giornoId) {
+    return Db.all('turni').some(function (t) { return t.giorno_id === giornoId && !Util.bool(t.eliminato); });
+  }
+
+  /**
+   * Allinea le giornate di un evento alle sue date. Da chiamare dentro Db.withLock, dopo ogni
+   * creazione/aggiornamento dell'evento. Ritorna true se qualcosa è cambiato.
+   */
+  function riallinea(e, actorEmail) {
+    var stamp = Util.nowIso();
+    var autore = actorEmail || 'calendar';
+    var righe = righeEvento(e.id);
+    var perData = {};
+    righe.forEach(function (r) { perData[r.data] = r; });
+    var calc = calGiorni(e);
+    var vive = {};
+    var cambiato = false;
+
+    calc.forEach(function (c) {
+      vive[c.data] = true;
+      var r = perData[c.data];
+      if (!r) {
+        Db.insert('giorni', {
+          id: Util.newId('gi'), evento_id: e.id, data: c.data, ora_inizio: c.ora_inizio, ora_fine: c.ora_fine,
+          origine: 'calendario', origine_orario: 'calendario', cal_inizio: c.ora_inizio, cal_fine: c.ora_fine, cal_base: '',
+          nota: '', stato: 'attiva', eliminato: '', creato_il: stamp, aggiornato_il: stamp, aggiornato_da: autore, versione: '1'
+        });
+        cambiato = true;
+        return;
+      }
+      if (!attivo(r) || r.origine !== 'calendario') return;   // tolta a mano o aggiunta a mano: non si tocca
+      var patch = {};
+      if (r.cal_inizio !== c.ora_inizio) patch.cal_inizio = c.ora_inizio;
+      if (r.cal_fine !== c.ora_fine) patch.cal_fine = c.ora_fine;
+      if (r.origine_orario !== 'manuale') {
+        if (r.ora_inizio !== c.ora_inizio) patch.ora_inizio = c.ora_inizio;
+        if (r.ora_fine !== c.ora_fine) patch.ora_fine = c.ora_fine;
+      }
+      if (r.stato === 'fuori_calendario') patch.stato = 'attiva';
+      if (Object.keys(patch).length) {
+        patch.aggiornato_il = stamp; patch.aggiornato_da = autore;
+        Db.update('giorni', 'id', r.id, patch);
+        cambiato = true;
+      }
+    });
+
+    // giornate nate dal Calendar che il Calendar non indica più
+    righe.forEach(function (r) {
+      if (!attivo(r) || r.origine !== 'calendario' || vive[r.data]) return;
+      var toccata = r.origine_orario === 'manuale' || !!r.nota || haTurni(r.id);
+      if (!toccata) {
+        Db.update('giorni', 'id', r.id, { eliminato: 'TRUE', aggiornato_il: stamp, aggiornato_da: autore });
+        cambiato = true;
+      } else if (r.stato !== 'fuori_calendario') {
+        Db.update('giorni', 'id', r.id, { stato: 'fuori_calendario', aggiornato_il: stamp, aggiornato_da: autore });
+        cambiato = true;
+      }
+    });
+
+    // un evento ha sempre almeno una giornata
+    if (calc.length && !attive(e.id).length) {
+      var c0 = calc[0], r0 = perData[c0.data];
+      if (r0) Db.update('giorni', 'id', r0.id, { eliminato: '', stato: 'attiva', aggiornato_il: stamp, aggiornato_da: autore });
+      else Db.insert('giorni', {
+        id: Util.newId('gi'), evento_id: e.id, data: c0.data, ora_inizio: c0.ora_inizio, ora_fine: c0.ora_fine,
+        origine: 'calendario', origine_orario: 'calendario', cal_inizio: c0.ora_inizio, cal_fine: c0.ora_fine, cal_base: '',
+        nota: '', stato: 'attiva', eliminato: '', creato_il: stamp, aggiornato_il: stamp, aggiornato_da: autore, versione: '1'
+      });
+      cambiato = true;
+    }
+    return cambiato;
+  }
+
+  // ---------- vista ----------
+  function chiaveCal(r) { return (r.cal_inizio || '') + '|' + (r.cal_fine || ''); }
+
+  /** La giornata ha un orario corretto a mano e il Calendar nel frattempo è cambiato. */
+  function differenza(r) {
+    return r.origine === 'calendario' && r.origine_orario === 'manuale' && r.stato !== 'fuori_calendario' && chiaveCal(r) !== (r.cal_base || '');
+  }
+
+  function vistaBase(r, n, di, accesso) {
+    return {
+      id: r.id, n: n, di: di, data: r.data, ora_inizio: r.ora_inizio, ora_fine: r.ora_fine,
+      dopo_mezzanotte: dopoMezzanotte(r.ora_inizio, r.ora_fine),
+      origine: r.origine, origine_orario: r.origine_orario, cal_inizio: r.cal_inizio, cal_fine: r.cal_fine,
+      diff: differenza(r), stato: r.stato, nota: accesso ? r.nota : '', versione: r.versione, virtuale: false
+    };
+  }
+
+  /**
+   * Strumento per le liste: una sola lettura delle tabelle. `st` è il risultato di Staff.perLista(user).
+   * di(e) → giornate dell'evento già pronte, con lo staff di ogni giornata.
+   */
+  function perLista(user, st) {
+    var owner = !!(user && Users.can(user, 'admin'));
+    var perEv = {};
+    Db.all('giorni').forEach(function (r) {
+      if (!attivo(r)) return;
+      (perEv[r.evento_id] = perEv[r.evento_id] || []).push(r);
+    });
+    var turniPer = Turni.perGiorno();
+    var analisi = owner ? Turni.analizza() : null;
+    return {
+      analisi: analisi,
+      conflitti: function (eventoId) { return analisi ? analisi.sovrapposizioniEvento(eventoId) : 0; },
+      di: function (e) {
+        var righe = (perEv[e.id] || []).slice().sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : 0; });
+        var accesso = st.accesso(e);
+        if (!righe.length) {
+          // evento senza giornate scritte (non ancora allineato): si mostrano quelle previste, in sola lettura
+          var calc = calGiorni(e);
+          return calc.map(function (c, i) {
+            return { id: '', n: i + 1, di: calc.length, data: c.data, ora_inizio: c.ora_inizio, ora_fine: c.ora_fine,
+              dopo_mezzanotte: dopoMezzanotte(c.ora_inizio, c.ora_fine), origine: 'calendario', origine_orario: 'calendario',
+              cal_inizio: c.ora_inizio, cal_fine: c.ora_fine, diff: false, stato: 'attiva', nota: '', versione: '0', virtuale: true, staff: [] };
+          });
+        }
+        return righe.map(function (r, i) {
+          var v = vistaBase(r, i + 1, righe.length, accesso);
+          v.staff = Turni.staffGiorno(r.id, turniPer, owner, analisi);
+          return v;
+        });
+      }
+    };
+  }
+
+  // ---------- azioni ----------
+  function giornoDi_(id) {
+    var r = Db.find('giorni', 'id', String(id || ''));
+    if (!r || !attivo(r)) throw new CtrlError('NOT_FOUND', 'Giornata non trovata');
+    return r;
+  }
+
+  function eventoDi_(id) {
+    var e = Db.find('eventi', 'id', String(id || ''));
+    if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
+    return e;
+  }
+
+  /** Orari e giornate: serve poter modificare. La nota è un contenuto riservato allo staff dell'evento. */
+  function permessi_(user, e, conNota) {
+    Users.require(user, 'modificare');
+    if (conNota) Staff.richiediEvento(user, e);
+    else if (!Staff.puoVedere(user, e)) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
+  }
+
+  function orario_(v, etichetta) {
+    var t = v === undefined || v === null ? '' : String(v).trim();
+    if (t && !Util.isTime(t)) throw new CtrlError('INVALID', etichetta + ' non valido');
+    return t;
+  }
+
+  function rispondi_(user, eventoId) { return Events.get(user, { id: eventoId }); }
+
+  /** Orari e nota di una giornata. Un orario diverso dal Calendar diventa "manuale". */
+  function salva(user, p) {
+    p = p || {};
+    var r0 = giornoDi_(p.id);
+    var e = eventoDi_(r0.evento_id);
+    permessi_(user, e, 'nota' in p);
+    var patch = {};
+    var tocca = 'ora_inizio' in p || 'ora_fine' in p;
+    var inizio = r0.ora_inizio, fine = r0.ora_fine;
+    if ('ora_inizio' in p) inizio = orario_(p.ora_inizio, 'Orario di inizio');
+    if ('ora_fine' in p) fine = orario_(p.ora_fine, 'Orario di fine');
+    if (tocca && inizio && fine && inizio === fine) throw new CtrlError('INVALID', 'Inizio e fine coincidono');
+    if ('nota' in p) patch.nota = Util.text(p.nota, 500);
+    if (tocca && (inizio !== r0.ora_inizio || fine !== r0.ora_fine)) {
+      patch.ora_inizio = inizio; patch.ora_fine = fine;
+      if (r0.origine === 'calendario') {
+        if (inizio === (r0.cal_inizio || '') && fine === (r0.cal_fine || '')) { patch.origine_orario = 'calendario'; patch.cal_base = ''; }
+        else {
+          patch.origine_orario = 'manuale';
+          // si ricorda cosa diceva il Calendar quando l'orario è stato corretto
+          if (r0.origine_orario !== 'manuale') patch.cal_base = chiaveCal(r0);
+        }
+      } else patch.origine_orario = 'manuale';
+    }
+    if (!Object.keys(patch).length) throw new CtrlError('INVALID', 'Nessuna modifica');
+    patch.aggiornato_il = Util.nowIso(); patch.aggiornato_da = user.email;
+    return Db.withLock(function () {
+      var prima = JSON.parse(JSON.stringify(Db.find('giorni', 'id', r0.id)));
+      var row = Db.update('giorni', 'id', r0.id, patch, p.versione);
+      var d = Storico.diff(prima, row, ['ora_inizio', 'ora_fine', 'nota', 'origine_orario']);
+      if (d.changed) { d.prima.giorno = row.data; Storico.log(user.email, e.id, 'giornata', 'modifica', row.id, d.prima, d.dopo); }
+      return rispondi_(user, e.id);
+    });
+  }
+
+  /** Davanti a una differenza col Calendar: usa il nuovo orario del Calendar oppure tieni il proprio. */
+  function calendario(user, p) {
+    p = p || {};
+    var r0 = giornoDi_(p.id);
+    var e = eventoDi_(r0.evento_id);
+    permessi_(user, e);
+    var scelta = String(p.scelta || '');
+    if (scelta !== 'usa' && scelta !== 'tieni') throw new CtrlError('INVALID', 'Scelta non valida');
+    if (r0.origine !== 'calendario') throw new CtrlError('INVALID', 'Questa giornata non arriva dal Calendar');
+    return Db.withLock(function () {
+      var prima = JSON.parse(JSON.stringify(Db.find('giorni', 'id', r0.id)));
+      var patch = { aggiornato_il: Util.nowIso(), aggiornato_da: user.email };
+      if (scelta === 'usa') {
+        patch.ora_inizio = r0.cal_inizio; patch.ora_fine = r0.cal_fine; patch.origine_orario = 'calendario'; patch.cal_base = '';
+      } else {
+        patch.cal_base = chiaveCal(r0);
+      }
+      var row = Db.update('giorni', 'id', r0.id, patch, p.versione);
+      Storico.log(user.email, e.id, 'giornata', scelta === 'usa' ? 'orario_calendario' : 'orario_tenuto', row.id,
+        { giorno: row.data, ora_inizio: prima.ora_inizio, ora_fine: prima.ora_fine }, { ora_inizio: row.ora_inizio, ora_fine: row.ora_fine });
+      return rispondi_(user, e.id);
+    });
+  }
+
+  /** Aggiunge una giornata a mano (montaggio il giorno prima, smontaggio il giorno dopo…). */
+  function aggiungi(user, p) {
+    p = p || {};
+    var e = eventoDi_(p.evento_id);
+    permessi_(user, e);
+    if (!Util.isDate(p.data)) throw new CtrlError('INVALID', 'Data non valida');
+    var inizio = orario_(p.ora_inizio, 'Orario di inizio'), fine = orario_(p.ora_fine, 'Orario di fine');
+    if (inizio && fine && inizio === fine) throw new CtrlError('INVALID', 'Inizio e fine coincidono');
+    return Db.withLock(function () {
+      var righe = righeEvento(e.id);
+      if (righe.filter(attivo).length >= MAX_GIORNI) throw new CtrlError('INVALID', 'Troppe giornate per questo evento');
+      var stamp = Util.nowIso();
+      var esistente = righe.filter(function (r) { return r.data === p.data; })[0];
+      var row;
+      if (esistente && attivo(esistente)) throw new CtrlError('CONFLICT', 'Esiste già una giornata con questa data');
+      if (esistente) {
+        // giornata tolta in precedenza: si riattiva come giornata manuale
+        row = Db.update('giorni', 'id', esistente.id, { eliminato: '', stato: 'attiva', origine: 'manuale', origine_orario: 'manuale',
+          ora_inizio: inizio, ora_fine: fine, cal_inizio: '', cal_fine: '', cal_base: '', nota: '', aggiornato_il: stamp, aggiornato_da: user.email });
+      } else {
+        row = Db.insert('giorni', {
+          id: Util.newId('gi'), evento_id: e.id, data: p.data, ora_inizio: inizio, ora_fine: fine, origine: 'manuale', origine_orario: 'manuale',
+          cal_inizio: '', cal_fine: '', cal_base: '', nota: '', stato: 'attiva', eliminato: '', creato_il: stamp, aggiornato_il: stamp,
+          aggiornato_da: user.email, versione: '1'
+        });
+      }
+      Storico.log(user.email, e.id, 'giornata', 'aggiungi', row.id, '', { giorno: row.data, ora_inizio: inizio, ora_fine: fine });
+      Turni.riallinea(e, user.email);
+      return rispondi_(user, e.id);
+    });
+  }
+
+  /** Toglie una giornata. Se c'è staff assegnato serve la conferma (conferma: true). Almeno una giornata resta. */
+  function rimuovi(user, p) {
+    p = p || {};
+    var r0 = giornoDi_(p.id);
+    var e = eventoDi_(r0.evento_id);
+    permessi_(user, e);
+    return Db.withLock(function () {
+      var vive = attive(e.id);
+      if (vive.length <= 1) throw new CtrlError('INVALID', 'L\'evento deve avere almeno una giornata');
+      var turni = Db.all('turni').filter(function (t) { return t.giorno_id === r0.id && !Util.bool(t.eliminato); });
+      if (turni.length && !p.conferma) return { richiede_conferma: true, turni: turni.length, giorno: r0.data };
+      var stamp = Util.nowIso();
+      turni.forEach(function (t) { Db.update('turni', 'id', t.id, { eliminato: 'TRUE', aggiornato_il: stamp, aggiornato_da: user.email }); });
+      Db.update('giorni', 'id', r0.id, { eliminato: 'TRUE', aggiornato_il: stamp, aggiornato_da: user.email });
+      Storico.log(user.email, e.id, 'giornata', 'rimuovi', r0.id, { giorno: r0.data, turni_tolti: turni.length }, '');
+      return rispondi_(user, e.id);
+    });
+  }
+
+  return {
+    calGiorni: calGiorni, intervallo: intervallo, dopoMezzanotte: dopoMezzanotte, riallinea: riallinea, attive: attive,
+    perLista: perLista, salva: salva, calendario: calendario, aggiungi: aggiungi, rimuovi: rimuovi, differenza: differenza,
+    righeEvento: righeEvento, MAX_GIORNI: MAX_GIORNI
+  };
+})();
+
+// ===== 26_Turni.js =====
+/**
+ * CTRL · Turni: chi lavora in quale giornata, con quale orario, e se è già impegnato altrove.
+ *
+ * - Un TURNO è una riga per tecnico e per giornata (tabella `turni`). Lo creano le assegnazioni confermate:
+ *   "tutte le giornate" (giorni_tutti) oppure solo quelle scelte. È anche la base dello Staff Work Report.
+ * - Orario del turno = il suo, se l'Owner lo ha scritto, altrimenti quello della giornata. Sempre orari PIANIFICATI.
+ * - Controllo disponibilità (solo Owner, mai bloccante). Per ogni giornata, rispetto agli altri turni confermati
+ *   di eventi non annullati della stessa persona:
+ *     sovrapposizione  orari che si incrociano (anche a cavallo della mezzanotte)   → rosso
+ *     da_verificare    stessa data, ma manca un orario                               → arancione
+ *     stesso_giorno    stessa data, orari che non si toccano                         → azzurro
+ *     (nulla)          libero
+ *   Due turni che si toccano soltanto (uno finisce alle 23:00, l'altro inizia alle 23:00) non si sovrappongono.
+ * - Nessuna riga si cancella: `eliminato`.
+ */
+var Turni = (function () {
+  var RANGO = { sovrapposizione: 3, da_verificare: 2, stesso_giorno: 1 };
+  var MAX_ALTRI = 6;
+
+  function attivo(r) { return !Util.bool(r.eliminato); }
+
+  function utentiPerEmail_() {
+    var m = {};
+    Db.all('utenti').forEach(function (u) { m[Util.normEmail(u.email)] = u; });
+    return m;
+  }
+
+  function nomeUtente_(m, email) {
+    var u = m[email];
+    return u ? Staff.nomeDi(u) : String(email).split('@')[0];
+  }
+
+  /** Turno con orari effettivi e intervallo assoluto. */
+  function arricchisci_(t, g, e) {
+    var i = t.ora_inizio || g.ora_inizio || '', f = t.ora_fine || g.ora_fine || '';
+    return { t: t, g: g, e: e, email: t.email, data: g.data, ora_inizio: i, ora_fine: f, iv: Giorni.intervallo(g.data, i, f) };
+  }
+
+  function carica_() {
+    var ev = {}, gi = {};
+    Db.all('eventi').forEach(function (e) { ev[e.id] = e; });
+    Db.all('giorni').forEach(function (g) { if (attivo(g)) gi[g.id] = g; });
+    var out = [];
+    Db.all('turni').forEach(function (t) {
+      if (!attivo(t)) return;
+      var g = gi[t.giorno_id], e = ev[t.evento_id];
+      if (g && e) out.push(arricchisci_(t, g, e));
+    });
+    return out;
+  }
+
+  /** Livello di conflitto fra due impegni della stessa persona (null = nessuno). */
+  function confronta_(a, b) {
+    if (a.iv && b.iv && a.iv.s < b.iv.e && b.iv.s < a.iv.e) return 'sovrapposizione';
+    if (a.data === b.data) return a.iv && b.iv ? 'stesso_giorno' : 'da_verificare';
+    return null;
+  }
+
+  function altro_(o, livello) {
+    return { evento_id: o.e.id, titolo: o.e.titolo, data: o.data, ora_inizio: o.ora_inizio, ora_fine: o.ora_fine, livello: livello };
+  }
+
+  function aggiungi_(res, o, livello) {
+    if (!res.livello || RANGO[livello] > RANGO[res.livello]) res.livello = livello;
+    res.altri.push(altro_(o, livello));
+  }
+
+  /** Analisi di tutti i turni attivi: conflitti per turno, per evento. */
+  function analizza() {
+    var tutti = carica_();
+    var perEmail = {};
+    tutti.forEach(function (x) {
+      if (x.e.stato === 'annullato') return;
+      (perEmail[x.email] = perEmail[x.email] || []).push(x);
+    });
+    var livelli = {};
+    var res = function (x) { return livelli[x.t.id] || (livelli[x.t.id] = { livello: null, altri: [] }); };
+    Object.keys(perEmail).forEach(function (em) {
+      var l = perEmail[em].sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : 0; });
+      for (var i = 0; i < l.length; i++) {
+        for (var j = i + 1; j < l.length; j++) {
+          if (Util.dayNum(l[j].data) - Util.dayNum(l[i].data) > 1) break;
+          var lv = confronta_(l[i], l[j]);
+          if (!lv) continue;
+          aggiungi_(res(l[i]), l[j], lv);
+          aggiungi_(res(l[j]), l[i], lv);
+        }
+      }
+    });
+    return {
+      tutti: tutti,
+      livello: function (turnoId) { return livelli[turnoId] || { livello: null, altri: [] }; },
+      sovrapposizioniEvento: function (eventoId) {
+        var n = 0;
+        tutti.forEach(function (x) { if (x.e.id === eventoId && x.e.stato !== 'annullato' && livelli[x.t.id] && livelli[x.t.id].livello === 'sovrapposizione') n++; });
+        return n;
+      }
+    };
+  }
+
+  /** Disponibilità di una persona nelle giornate indicate di un evento (anche se non ancora assegnata). */
+  function valuta_(email, giorniRows, tutti) {
+    var miei = tutti.filter(function (x) { return x.email === email && x.e.stato !== 'annullato'; });
+    return giorniRows.map(function (g) {
+      var proprio = miei.filter(function (x) { return x.g.id === g.id; })[0];
+      var ora = proprio ? { data: g.data, iv: proprio.iv } : { data: g.data, iv: Giorni.intervallo(g.data, g.ora_inizio, g.ora_fine) };
+      var res = { livello: null, altri: [] };
+      miei.forEach(function (o) {
+        if (o.g.id === g.id) return;
+        var lv = confronta_(ora, o);
+        if (lv) aggiungi_(res, o, lv);
+      });
+      res.altri = res.altri.slice(0, MAX_ALTRI);
+      return { giorno_id: g.id, data: g.data, ora_inizio: proprio ? proprio.ora_inizio : g.ora_inizio, ora_fine: proprio ? proprio.ora_fine : g.ora_fine,
+        livello: res.livello, altri: res.altri };
+    });
+  }
+
+  function peggiore_(lista) {
+    var best = null;
+    lista.forEach(function (x) { if (x.livello && (!best || RANGO[x.livello] > RANGO[best])) best = x.livello; });
+    return best;
+  }
+
+  // ---------- lettura per le viste ----------
+  function perGiorno() {
+    var by = {};
+    Db.all('turni').forEach(function (t) { if (attivo(t)) (by[t.giorno_id] = by[t.giorno_id] || []).push(t); });
+    return { by: by, utenti: utentiPerEmail_() };
+  }
+
+  /** Persone di una giornata. L'Owner vede anche email, orari del turno e conflitti. */
+  function staffGiorno(giornoId, idx, owner, analisi) {
+    var righe = idx.by[giornoId] || [];
+    return righe.map(function (t) {
+      var u = idx.utenti[t.email] || { email: t.email, nome: '' };
+      var v = { id: u.id || '', nome: Staff.nomeDi(u), colore: Users.coloreDi(u) };
+      if (owner) {
+        v.email = t.email; v.turno_id = t.id; v.propri_inizio = t.ora_inizio; v.propri_fine = t.ora_fine; v.nota = t.nota;
+        var l = analisi ? analisi.livello(t.id) : { livello: null, altri: [] };
+        v.livello = l.livello; v.conflitti = l.altri.slice(0, MAX_ALTRI);
+      }
+      return v;
+    }).sort(function (a, b) { return a.nome.toLowerCase() < b.nome.toLowerCase() ? -1 : a.nome.toLowerCase() > b.nome.toLowerCase() ? 1 : 0; });
+  }
+
+  /** Turni di una persona in un evento (scheda Staff dell'Owner). */
+  function perPersona(e, email, analisi) {
+    var giorni = Giorni.attive(e.id);
+    var turni = {};
+    Db.all('turni').forEach(function (t) { if (t.evento_id === e.id && t.email === email && attivo(t)) turni[t.giorno_id] = t; });
+    var out = [];
+    giorni.forEach(function (g, i) {
+      var t = turni[g.id];
+      if (!t) return;
+      var x = arricchisci_(t, g, e);
+      var l = analisi.livello(t.id);
+      out.push({ turno_id: t.id, giorno_id: g.id, n: i + 1, di: giorni.length, data: g.data, ora_inizio: x.ora_inizio, ora_fine: x.ora_fine,
+        propri_inizio: t.ora_inizio, propri_fine: t.ora_fine, nota: t.nota, versione: t.versione,
+        dopo_mezzanotte: Giorni.dopoMezzanotte(x.ora_inizio, x.ora_fine), livello: l.livello, conflitti: l.altri.slice(0, MAX_ALTRI) });
+    });
+    return out;
+  }
+
+  /** Disponibilità dei candidati (utenti non ancora assegnati) per le giornate di un evento. */
+  function perCandidati(e, emails, tutti) {
+    var giorni = Giorni.attive(e.id);
+    var out = {};
+    emails.forEach(function (em) {
+      var gg = valuta_(em, giorni, tutti);
+      out[em] = { livello: peggiore_(gg), giorni: gg.map(function (x) { return { giorno_id: x.giorno_id, livello: x.livello }; }) };
+    });
+    return out;
+  }
+
+  // ---------- scrittura ----------
+  function indice_(eventoId) {
+    var m = {};
+    Db.all('turni').forEach(function (t) {
+      if (t.evento_id !== eventoId) return;
+      var k = t.email + '|' + t.giorno_id;
+      if (!m[k] || (attivo(t) && !attivo(m[k]))) m[k] = t;
+    });
+    return m;
+  }
+
+  function assicura_(e, email, g, autore, stamp, idx) {
+    var k = email + '|' + g.id;
+    var t = idx[k];
+    if (t) {
+      if (attivo(t)) return false;
+      idx[k] = Db.update('turni', 'id', t.id, { eliminato: '', ora_inizio: '', ora_fine: '', nota: '', aggiornato_il: stamp, aggiornato_da: autore });
+      return true;
+    }
+    idx[k] = Db.insert('turni', {
+      id: Util.newId('tu'), evento_id: e.id, giorno_id: g.id, email: email, ora_inizio: '', ora_fine: '', nota: '', eliminato: '',
+      creato_il: stamp, creato_da: autore, aggiornato_il: stamp, aggiornato_da: autore, versione: '1'
+    });
+    return true;
+  }
+
+  function togli_(t, autore, stamp) {
+    if (!attivo(t)) return false;
+    Db.update('turni', 'id', t.id, { eliminato: 'TRUE', aggiornato_il: stamp, aggiornato_da: autore });
+    return true;
+  }
+
+  /**
+   * Allinea i turni di un evento a giornate e assegnazioni. Da chiamare dentro Db.withLock.
+   * Giornate tolte → turni tolti; assegnati a "tutte le giornate" → un turno per ogni giornata attiva.
+   */
+  function riallinea(e, autore) {
+    autore = autore || 'sistema';
+    var stamp = Util.nowIso();
+    var giorni = Giorni.attive(e.id);
+    var vive = {};
+    giorni.forEach(function (g) { vive[g.id] = true; });
+    var idx = indice_(e.id);
+    var cambiato = false;
+    Object.keys(idx).forEach(function (k) {
+      if (!vive[idx[k].giorno_id] && togli_(idx[k], autore, stamp)) cambiato = true;
+    });
+    Db.all('assegnazioni').forEach(function (r) {
+      if (r.evento_id !== e.id || r.stato !== 'confermata' || r.giorni_tutti === 'FALSE') return;
+      giorni.forEach(function (g) { if (assicura_(e, r.email, g, autore, stamp, idx)) cambiato = true; });
+    });
+    return cambiato;
+  }
+
+  /** Giornate scelte per un'assegnazione: null = tutte; altrimenti elenco di id validi. Rifiuta scelte vuote. */
+  function normalizzaGiorni(e, ids) {
+    if (ids === undefined || ids === null) return null;
+    if (!Array.isArray(ids)) throw new CtrlError('INVALID', 'Giornate non valide');
+    var giorni = Giorni.attive(e.id);
+    var sel = {};
+    ids.forEach(function (id) { sel[String(id)] = true; });
+    var validi = giorni.filter(function (g) { return sel[g.id]; });
+    if (!validi.length) throw new CtrlError('INVALID', 'Scegli almeno una giornata');
+    if (validi.length === giorni.length) return null;
+    return validi.map(function (g) { return g.id; });
+  }
+
+  /** Imposta le giornate di una persona già confermata sull'evento. `ids` già normalizzato (null = tutte). */
+  function imposta_(e, email, ids, autore) {
+    var stamp = Util.nowIso();
+    var riga = Db.all('assegnazioni').filter(function (r) { return r.evento_id === e.id && r.email === email; })[0];
+    if (!riga) throw new CtrlError('NOT_FOUND', 'Assegnazione non trovata');
+    Db.update('assegnazioni', 'id', riga.id, { giorni_tutti: ids ? 'FALSE' : 'TRUE' });
+    var sel = null;
+    if (ids) { sel = {}; ids.forEach(function (id) { sel[id] = true; }); }
+    var idx = indice_(e.id);
+    Giorni.attive(e.id).forEach(function (g) {
+      if (!sel || sel[g.id]) assicura_(e, email, g, autore, stamp, idx);
+      else if (idx[email + '|' + g.id]) togli_(idx[email + '|' + g.id], autore, stamp);
+    });
+  }
+
+  /** Toglie tutti i turni di una persona in un evento (assegnazione rimossa dall'Owner). */
+  function togli(eventoId, email, autore) {
+    var stamp = Util.nowIso(), n = 0;
+    Db.all('turni').forEach(function (t) {
+      if (t.evento_id === eventoId && t.email === email && togli_(t, autore, stamp)) n++;
+    });
+    return n;
+  }
+
+  /** Utente eliminato: spariscono i turni da oggi in poi, lo storico delle giornate già svolte resta. */
+  function togliFuturi(email, autore) {
+    var stamp = Util.nowIso(), oggi = Util.today(), n = 0;
+    var gi = {};
+    Db.all('giorni').forEach(function (g) { gi[g.id] = g; });
+    Db.all('turni').forEach(function (t) {
+      var g = gi[t.giorno_id];
+      if (t.email === email && g && g.data >= oggi && togli_(t, autore, stamp)) n++;
+    });
+    return n;
+  }
+
+  /** Cambio email di un utente. */
+  function rinomina(vecchia, nuova, autore) {
+    var stamp = Util.nowIso();
+    Db.all('turni').forEach(function (t) {
+      if (t.email === vecchia) Db.update('turni', 'id', t.id, { email: nuova, aggiornato_il: stamp, aggiornato_da: autore });
+    });
+  }
+
+  /** Allinea tutti gli eventi (migrazione). */
+  function riallineaTutti(autore) {
+    var n = 0;
+    Db.all('eventi').forEach(function (e) {
+      if (Giorni.riallinea(e, autore)) n++;
+      Turni.riallinea(e, autore);
+    });
+    return n;
+  }
+
+  // ---------- azioni dell'Owner ----------
+  function eventoDi_(id) {
+    var e = Db.find('eventi', 'id', String(id || ''));
+    if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
+    return e;
+  }
+
+  function orario_(v, etichetta) {
+    var t = v === undefined || v === null ? '' : String(v).trim();
+    if (t && !Util.isTime(t)) throw new CtrlError('INVALID', etichetta + ' non valido');
+    return t;
+  }
+
+  /** Orario e nota di un turno. Orari vuoti = come la giornata. */
+  function salva(actor, p) {
+    Users.require(actor, 'impostazioni');
+    p = p || {};
+    var e = eventoDi_(p.evento_id);
+    var email = Util.normEmail(p.email);
+    var g = Db.find('giorni', 'id', String(p.giorno_id || ''));
+    if (!g || !attivo(g) || g.evento_id !== e.id) throw new CtrlError('NOT_FOUND', 'Giornata non trovata');
+    var inizio = orario_(p.ora_inizio, 'Orario di inizio'), fine = orario_(p.ora_fine, 'Orario di fine');
+    if (inizio && fine && inizio === fine) throw new CtrlError('INVALID', 'Inizio e fine coincidono');
+    var nota = Util.text(p.nota, 500);
+    Db.withLock(function () {
+      var t = Db.all('turni').filter(function (x) { return x.evento_id === e.id && x.giorno_id === g.id && x.email === email && attivo(x); })[0];
+      if (!t) throw new CtrlError('NOT_FOUND', 'Questa persona non lavora in questa giornata');
+      var prima = JSON.parse(JSON.stringify(t));
+      var row = Db.update('turni', 'id', t.id, { ora_inizio: inizio, ora_fine: fine, nota: nota, aggiornato_il: Util.nowIso(), aggiornato_da: actor.email }, p.versione);
+      var d = Storico.diff(prima, row, ['ora_inizio', 'ora_fine', 'nota']);
+      if (d.changed) { d.prima.giorno = g.data; d.prima.persona = email; Storico.log(actor.email, e.id, 'turno', 'modifica', row.id, d.prima, d.dopo); }
+    });
+    return Staff.lista(actor, { evento_id: e.id });
+  }
+
+  /** Controllo disponibilità prima di assegnare: per ogni giornata dice se la persona è libera. Non scrive nulla. */
+  function verifica(actor, p) {
+    Users.require(actor, 'impostazioni');
+    p = p || {};
+    var e = eventoDi_(p.evento_id);
+    var email = Util.normEmail(p.email);
+    if (!Util.isEmail(email)) throw new CtrlError('INVALID', 'Email non valida');
+    var giorni = Giorni.attive(e.id);
+    var scelti = normalizzaGiorni(e, p.giorni);
+    if (scelti) giorni = giorni.filter(function (g) { return scelti.indexOf(g.id) >= 0; });
+    var tutti = carica_();
+    var gg = valuta_(email, giorni, tutti);
+    var utenti = utentiPerEmail_();
+    return {
+      evento_id: e.id, email: email, nome: nomeUtente_(utenti, email), livello: peggiore_(gg),
+      giorni: gg.map(function (x, i) { x.n = i + 1; return x; }),
+      // "liberi" = nessuna sovrapposizione e nessun orario da verificare (l'azzurro non è un problema)
+      liberi: gg.filter(function (x) { return !x.livello || x.livello === 'stesso_giorno'; }).map(function (x) { return x.giorno_id; })
+    };
+  }
+
+  return {
+    analizza: analizza, perGiorno: perGiorno, staffGiorno: staffGiorno, perPersona: perPersona, perCandidati: perCandidati,
+    riallinea: riallinea, normalizzaGiorni: normalizzaGiorni, imposta_: imposta_, togli: togli, togliFuturi: togliFuturi,
+    rinomina: rinomina, riallineaTutti: riallineaTutti, salva: salva, verifica: verifica, carica_: carica_, RANGO: RANGO
+  };
+})();
+
 // ===== 80_Api.js =====
 /**
  * CTRL · Punto di ingresso dell'API.
@@ -2319,6 +3086,14 @@ var ACTIONS = {
 
   'staff.evento': { fn: function (u, p) { return Staff.lista(u, p); } },
   'staff.gestisci': { fn: function (u, p) { return Staff.gestisci(u, p); } },
+
+  'staff.verifica': { fn: function (u, p) { return Turni.verifica(u, p); } },
+  'turni.salva': { fn: function (u, p) { return Turni.salva(u, p); } },
+
+  'giorni.salva': { fn: function (u, p) { return Giorni.salva(u, p); } },
+  'giorni.calendario': { fn: function (u, p) { return Giorni.calendario(u, p); } },
+  'giorni.aggiungi': { fn: function (u, p) { return Giorni.aggiungi(u, p); } },
+  'giorni.rimuovi': { fn: function (u, p) { return Giorni.rimuovi(u, p); } },
 
   'accesso.richieste': { fn: function (u) { return Richieste.lista(u); } },
   'accesso.gestisci': { fn: function (u, p) { return Richieste.gestisci(u, p); } },
@@ -2460,6 +3235,7 @@ function setup_(env) {
   migraRuoli_(log);
   migraColori_(log);
   migraNomeOwner_(log);
+  migraGiorni_(log);
   if (!Settings.getRaw('schema_versione')) Settings.setRaw('schema_versione', String(SCHEMA_VERSION));
 
   installTriggers_();
@@ -2554,4 +3330,17 @@ function migraNomeOwner_(log) {
   if (nome === String(u.nome || '').trim()) return;
   Db.update('utenti', 'email', u.email, { nome: nome, aggiornato_il: Util.nowIso() }, null, true);
   log.push('Nome del proprietario: ' + nome);
+}
+
+/**
+ * Dalla 0.11.0 ogni evento ha le sue giornate e ogni assegnazione confermata i suoi turni. Per gli eventi già presenti
+ * si creano le giornate dalle date del Calendar e un turno per ogni persona già assegnata. Non modifica né toglie nulla:
+ * idempotente, rieseguirla non cambia niente.
+ */
+function migraGiorni_(log) {
+  Db.clearCache();
+  var prima = Db.all('giorni').length, turniPrima = Db.all('turni').length;
+  Db.withLock(function () { Turni.riallineaTutti('setup'); });
+  var g = Db.all('giorni').length - prima, t = Db.all('turni').length - turniPrima;
+  if (g || t) log.push('Giornate create: ' + g + ' · turni creati: ' + t);
 }

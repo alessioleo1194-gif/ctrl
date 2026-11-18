@@ -65,3 +65,17 @@ export function dispositivo(ua) {
     : /Chrome|CriOS/.test(s) ? 'Chrome' : /Safari/.test(s) ? 'Safari' : '';
   return [os, br].filter(Boolean).join(' · ') || s.slice(0, 30);
 }
+
+/** "giovedì 26 novembre" in maiuscolo, per le intestazioni delle giornate. */
+export function giornoLungo(iso) {
+  return parse(iso).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).toUpperCase();
+}
+
+/** Orario di una giornata o di un turno: "21:00–23:00", "dalle 21:00", "fino alle 23:00", "da definire". */
+export function orarioGiornata(g) {
+  const i = g.ora_inizio || '', f = g.ora_fine || '';
+  if (i && f) return `${i}–${f}` + (g.dopo_mezzanotte ? ' (+1)' : '');
+  if (i) return 'dalle ' + i;
+  if (f) return 'fino alle ' + f;
+  return 'orario da definire';
+}

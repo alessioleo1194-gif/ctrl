@@ -67,14 +67,15 @@ async function noHorizontalScroll(page) {
 test('accesso con codice, lista eventi dal Calendar, nessuno scroll orizzontale', async ({ page }, info) => {
   const env = await setup(page);
   await login(page, env);
-  await expect(page.locator('.ev')).toHaveCount(3);
+  await expect(page.locator('.ev')).toHaveCount(5);   // il convegno di 3 giorni compare una volta per giornata
+  await expect(page.getByText('Giorno 2 di 3')).toBeVisible();
   await expect(page.getByText('Cantelmo: Maria Mazzotta')).toBeVisible();
   await expect(page.getByText('Evento passato')).toHaveCount(0);
   await page.getByRole('button', { name: 'Passati' }).click();
   await expect(page.getByText('Evento passato')).toBeVisible();
   await page.getByRole('button', { name: 'Prossimi' }).click();
   await page.getByLabel('Cerca').fill('castromediano');
-  await expect(page.locator('.ev')).toHaveCount(1);
+  await expect(page.locator('.ev')).toHaveCount(3);   // un evento, tre giornate
   await page.getByLabel('Cerca').fill('');
   await noHorizontalScroll(page);
   await page.screenshot({ path: `test-results/lista-${info.project.name}.png`, fullPage: true });
@@ -194,7 +195,7 @@ test('utente in sola lettura: niente creazione, niente impostazioni, note non mo
   apiCall(env, tok, 'staff.gestisci', { evento_id: idConv, azione: 'aggiungi', email: 'tecnico@example.com' });
   await page.goto('/#/');
   await page.reload();
-  await page.getByText('Convegno Museo Castromediano').click();
+  await page.getByText('Convegno Museo Castromediano').first().click();
   await expect(page.getByLabel('Note di produzione')).toHaveCount(0);
   await expect(page.getByText('Cantelmo: Maria Mazzotta')).toHaveCount(0);
   await page.goto('/#/impostazioni');
@@ -238,7 +239,7 @@ const apiCall = (env, token, action, payload) => env.ctx.handleRequest(JSON.stri
 
 async function openEvent(page, env, title = 'Cantelmo: Maria Mazzotta') {
   await login(page, env);
-  await page.getByText(title).click();
+  await page.getByText(title).first().click();
   await expect(page.getByRole('heading', { name: title })).toBeVisible();
 }
 
@@ -884,12 +885,12 @@ test('staff: proposte dal calendario, conferma dell\'Owner, nomi colorati sulle 
   await expect(page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).locator('.nm.me')).toHaveText('Roberto');
   await expect(page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).locator('.nm.pc-viola')).toHaveText('Luca');
   await expect(page.locator('.ev .tag.warn')).toHaveCount(0);   // le proposte sono solo dell'Owner
-  await expect(page.locator('.ev')).toHaveCount(3);
+  await expect(page.locator('.ev')).toHaveCount(5);
   await page.getByRole('button', { name: 'Solo i miei' }).click();
-  await expect(page.locator('.ev')).toHaveCount(2);
+  await expect(page.locator('.ev')).toHaveCount(4);   // Cantelmo (1 giornata) e il convegno (3 giornate)
   await expect(page.locator('.ev', { hasText: 'Swing night' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Solo i miei' }).click();
-  await expect(page.locator('.ev')).toHaveCount(3);
+  await expect(page.locator('.ev')).toHaveCount(5);
   await page.locator('.ev', { hasText: 'Cantelmo: Maria Mazzotta' }).click();
   await expect(page.getByLabel('Note di produzione')).toBeVisible();
   await expect(page.getByRole('button', { name: /Production Plan/ })).toBeVisible();

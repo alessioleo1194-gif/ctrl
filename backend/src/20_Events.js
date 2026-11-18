@@ -20,7 +20,7 @@ var Events = (function () {
     return out;
   }
 
-  function view(e, conteggi, user, st) {
+  function view(e, conteggi, user, st, gi) {
     var c = conteggi[e.id] || { piano: 0, materiale: 0, scheda: 0 };
     var accesso = st.accesso(e);
     var v = {
@@ -31,6 +31,8 @@ var Events = (function () {
       stato_doc: { piano: c.piano > 0, materiale: c.materiale > 0, scheda: c.scheda > 0 },
       staff: st.staff(e.id), mio: st.mio(e.id), accesso: accesso, da_confermare: st.daConfermare(e.id)
     };
+    v.giorni = gi.di(e);
+    if (user && Users.can(user, 'admin')) v.conflitti = gi.conflitti(e.id);
     if (user && Users.can(user, 'admin') && e.cartella_id) v.cartella_url = 'https://drive.google.com/drive/folders/' + e.cartella_id;
     return v;
   }
@@ -38,11 +40,12 @@ var Events = (function () {
   function list(user, p) {
     var conteggi = contaSezioni();
     var st = Staff.perLista(user);
+    var gi = Giorni.perLista(user, st);
     var includiArchiviati = !!(p && p.archiviati);
     return Db.all('eventi')
       .filter(function (e) { return includiArchiviati || e.stato !== 'archiviato'; })
       .filter(function (e) { return st.vede(e); })
-      .map(function (e) { return view(e, conteggi, user, st); })
+      .map(function (e) { return view(e, conteggi, user, st, gi); })
       .sort(function (a, b) {
         var ka = a.data + (a.ora_inizio || '99:99') + a.titolo;
         var kb = b.data + (b.ora_inizio || '99:99') + b.titolo;
@@ -56,7 +59,7 @@ var Events = (function () {
     var st = Staff.perLista(user);
     // chi non può vedere l'evento riceve la stessa risposta di un evento che non esiste
     if (!st.vede(e)) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
-    var out = view(e, contaSezioni(), user, st);
+    var out = view(e, contaSezioni(), user, st, Giorni.perLista(user, st));
     // chi non è nello staff vede l'evento ma non file, documenti e note
     out.allegati = out.accesso ? Allegati.perEvento(e.id) : null;
     out.produzione = out.accesso && e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;
@@ -111,6 +114,7 @@ var Events = (function () {
       f.versione = '1';
       var row = Db.insert('eventi', f);
       Storico.log(user.email, row.id, 'evento', 'crea', row.id, '', { titolo: row.titolo, data: row.data });
+      Giorni.riallinea(row, user.email);
       Staff.ricalcolaSicuro_();
       return get(user, { id: row.id });
     });
@@ -144,6 +148,8 @@ var Events = (function () {
       var row = Db.update('eventi', 'id', p.id, patch, p.versione);
       var d = Storico.diff(before, row, CAL_FIELDS.concat(['note']));
       if (d.changed) Storico.log(user.email, row.id, 'evento', 'modifica', row.id, d.prima, d.dopo);
+      // date o orari cambiati: le giornate (e i turni di chi lavora su tutte) seguono
+      if (fieldsChanged.length) { Giorni.riallinea(row, user.email); Turni.riallinea(row, user.email); }
       if (patch.descrizione !== undefined) Staff.ricalcolaSicuro_();
       return get(user, { id: row.id });
     });

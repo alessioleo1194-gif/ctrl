@@ -1,5 +1,23 @@
 # Registro delle modifiche
 
+## 0.11.0 · Giornate, orari modificabili e disponibilità dello staff (anteprima su TEST)
+
+- **Giornate**: ogni evento ha una sezione per giornata ("Giorno 2 di 3"), generata dal Calendar. Evento di un solo giorno = una giornata, anche se a cavallo della
+  mezzanotte (22:00–02:00 = una giornata, "+1 giorno"). Su più giorni: il primo prende l'inizio, l'ultimo la fine, gli altri orari restano "da definire".
+  Owner e Production correggono orari e nota di ogni giornata, aggiungono giornate a mano (montaggio, smontaggio) e le tolgono (almeno una resta; con staff assegnato serve conferma).
+- **Orari che non si perdono**: un orario corretto in CTRL ("Modificato da te") non viene mai sovrascritto dalla sincronizzazione. Se il Calendar cambia dopo,
+  compare la differenza e si sceglie "Tieni la mia" o "Usa quello del Calendar"; "Ripristina Calendar" riporta l'orario originale.
+- **Elenco eventi**: una riga per giornata sotto la sua data. Ricerca e "Solo i miei" restano per evento.
+- **Turni**: ogni persona assegnata ha un turno per giornata ("tutte le giornate" o solo alcune; le giornate aggiunte dopo vanno a chi lavora su tutte).
+  Orario del turno = quello della giornata, o uno suo scritto dall'Owner. Solo l'Owner assegna e modifica i turni.
+- **Controllo disponibilità (solo Owner, mai bloccante)**: prima di assegnare, per ogni giornata: rosso = orari che si sovrappongono (anche oltre la mezzanotte),
+  arancione = stessa data ma orario mancante (da verificare), azzurro = stesso giorno, orari compatibili, verde = libero. Due orari che si toccano (23:00/23:00) non si sovrappongono.
+  "Assegna comunque" e "Assegna solo i giorni liberi". Ricalcolato da solo se cambiano orari, giornate o staff; un evento annullato non occupa nessuno. ⚠ nell'elenco.
+- Schema 8: tabelle `giorni` e `turni`, colonna `giorni_tutti` in `assegnazioni` (solo aggiunte). La migrazione crea le giornate degli eventi esistenti e un turno per ogni
+  assegnazione confermata; è ripetibile e non modifica né toglie nulla. **Dopo l'aggiornamento di Apps Script va rilanciato il setup.**
+- Nuove azioni API: `giorni.salva/calendario/aggiungi/rimuovi`, `staff.verifica`, `turni.salva`; `staff.gestisci` accetta `giorni` e l'azione `giorni`.
+- Test: 21 backend nuovi (`giornate.test.mjs`), 10 e2e nuovi desktop+telefono (`giornate.spec.mjs`), 2 e2e adattati all'elenco per giornata.
+
 ## 0.10.2 · Indirizzo del sito operativo (17/11/2026)
 
 - Il sito operativo si chiamerà **ctrl-leo.netlify.app** ("ctrl.netlify.app" è di un altro sito). `PROD_HOSTS` elenca sia il nuovo nome sia il vecchio,

@@ -5,6 +5,7 @@ import { dateRange, timeRange, stamp } from '../format.js';
 import { openEventForm } from './eventForm.js';
 import { allegatiCard } from './allegati.js';
 import { staffCard } from './staff.js';
+import { giornateCard } from '../giornate.js';
 import { nomeTag } from '../persone.js';
 
 /** Dettaglio evento: informazioni, scheda di produzione, file allegati, note. */
@@ -53,7 +54,8 @@ function draw(pane, ev) {
 
   // chi non è nello staff vede l'evento ma non documenti, file e note
   const bloccato = ev.accesso === false;
-  const staff = p.admin ? staffCard(ev) : null;
+  const staff = p.admin ? staffCard(ev, (upd) => draw(pane, upd)) : null;
+  const giornate = giornateCard(ev, (upd) => draw(pane, upd));
   const notes = bloccato ? null : notesCard(ev, p, (upd) => draw(pane, upd));
   const produzione = bloccato ? bloccatoCard() : produzioneCard(ev, p);
   const allegati = bloccato ? null : allegatiCard(ev);
@@ -65,7 +67,7 @@ function draw(pane, ev) {
       h('span', { class: 'mono help' }, stamp(s.ts)),
       h('span', {}, h('b', {}, s.email === 'calendar' ? 'Calendar' : s.email), ' · ', s.azione, s.dopo ? h('span', { class: 'help' }, ' ' + s.dopo.slice(0, 140)) : null))))) : null;
 
-  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, staff, produzione, allegati, notes, admin, histo));
+  pane.replaceChildren(head, h('div', { class: 'detail-body' }, info, giornate, staff, produzione, allegati, notes, admin, histo));
 }
 
 /** Al posto di documenti, file e note per chi non è assegnato all'evento. */

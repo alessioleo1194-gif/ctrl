@@ -87,22 +87,28 @@ var CalendarSync = (function () {
           f.aggiornato_il = stamp; f.aggiornato_da = 'calendar';
           f.versione = '1';
           f.sync_il = stamp;
-          Db.insert('eventi', f);
+          var nuovo = Db.insert('eventi', f);
+          Giorni.riallinea(nuovo, 'calendar');
           res.creati++;
           return;
         }
         var patch = {};
         Events.CAL_FIELDS.forEach(function (k) { if ((row[k] || '') !== (f[k] || '')) patch[k] = f[k]; });
+        var rigaFinale = row;
         var reactivate = row.stato === 'annullato';
         if (reactivate) patch.stato = 'attivo';
         if (Object.keys(patch).length) {
           var before = JSON.parse(JSON.stringify(row));
           patch.aggiornato_il = stamp; patch.aggiornato_da = 'calendar'; patch.sync_il = stamp;
           var after = Db.update('eventi', 'id', row.id, patch);
+          rigaFinale = after;
           var d = Storico.diff(before, after, Events.CAL_FIELDS.concat(['stato']));
           if (d.changed) Storico.log('calendar', row.id, 'evento', reactivate ? 'riattivato' : 'sync', row.id, d.prima, d.dopo);
           if (reactivate) res.riattivati++; else res.aggiornati++;
         }
+        // giornate e turni seguono le date del Calendar (gli orari corretti a mano restano, con la segnalazione)
+        if (Giorni.riallinea(rigaFinale, 'calendar')) res.giornate = (res.giornate || 0) + 1;
+        Turni.riallinea(rigaFinale, 'calendar');
       });
 
       Object.keys(byKey).forEach(function (key) {

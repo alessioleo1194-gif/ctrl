@@ -1,6 +1,6 @@
 import { h, icon } from '../ui.js';
 import { store, navigate } from '../app.js';
-import { dayParts, monthLabel, today, timeRange, shortDate } from '../format.js';
+import { dayParts, monthLabel, today, timeRange, shortDate, orarioGiornata } from '../format.js';
 import { openEventForm } from './eventForm.js';
 import { staffNomi } from '../persone.js';
 
@@ -18,17 +18,32 @@ export function renderList(pane, selectedId) {
     return evs;
   }
 
-  function row(e) {
-    const p = dayParts(e.data);
-    const isToday = e.data <= t && (e.data_fine || e.data) >= t;
-    const multi = e.data_fine && e.data_fine !== e.data ? 'fino al ' + shortDate(e.data_fine) : '';
-    const meta = [multi, timeRange(e), e.luogo].filter(Boolean).join(' · ') || (e.origine === 'manuale' ? 'Evento manuale' : '—');
+  /** Un evento su più giorni compare una volta per giornata, sotto la sua data. */
+  function righe(evs) {
+    const out = [];
+    for (const e of evs) {
+      const gg = e.giorni && e.giorni.length ? e.giorni : [null];
+      for (const g of gg) out.push({ e, g, data: g ? g.data : e.data });
+    }
+    const dir = store.filter === 'passati' ? -1 : 1;
+    out.sort((a, b) => dir * ((a.data + (a.g?.ora_inizio || a.e.ora_inizio || '99:99') + a.e.titolo).localeCompare(b.data + (b.g?.ora_inizio || b.e.ora_inizio || '99:99') + b.e.titolo)));
+    return out;
+  }
+
+  function row(e, g) {
+    const multiGiorno = !!(g && g.di > 1);
+    const p = dayParts(g ? g.data : e.data);
+    const isToday = g ? g.data === t : (e.data <= t && (e.data_fine || e.data) >= t);
+    const orario = g ? (g.ora_inizio || g.ora_fine ? orarioGiornata(g) : '') : timeRange(e);
+    const multi = !g && e.data_fine && e.data_fine !== e.data ? 'fino al ' + shortDate(e.data_fine) : '';
+    const meta = [multi, orario, e.luogo].filter(Boolean).join(' · ') || (e.origine === 'manuale' ? 'Evento manuale' : '—');
+    const sovrapposto = !!(g && g.staff && g.staff.some(x => x.livello === 'sovrapposizione'));
     const ind = h('div', { class: 'ind', 'aria-label': 'Documentazione' },
       icon('piano', 'piano' + (e.stato_doc.piano ? ' on' : ''), e.stato_doc.piano ? 'Piano di produzione presente' : 'Piano di produzione mancante'),
       icon('materiale', 'materiale' + (e.stato_doc.materiale ? ' on' : ''), e.stato_doc.materiale ? 'Lista materiale presente' : 'Lista materiale mancante'),
       icon('scheda', 'scheda' + (e.stato_doc.scheda ? ' on' : ''), e.stato_doc.scheda ? 'Scheda tecnica presente' : 'Scheda tecnica mancante'));
-    const finito = (e.data_fine || e.data) < t;
-    const staff = e.staff || [];
+    const finito = (g ? g.data : (e.data_fine || e.data)) < t;
+    const staff = g && g.staff ? g.staff : (e.staff || []);
     const nomi = staff.length || e.da_confermare || !finito
       ? h('div', { class: 'names', 'aria-label': 'Staff' },
         staffNomi(staff),
@@ -36,8 +51,8 @@ export function renderList(pane, selectedId) {
         e.da_confermare ? h('span', { class: 'tag warn', title: 'Nomi trovati nella descrizione, da confermare nell\'evento' }, e.da_confermare + ' da confermare') : null)
       : null;
     return h('button', {
-      class: 'ev' + (e.stato === 'annullato' ? ' annullato' : '') + ((e.data_fine || e.data) < t ? ' passato' : ''),
-      role: 'listitem', 'aria-current': e.id === selectedId ? 'true' : null,
+      class: 'ev' + (e.stato === 'annullato' ? ' annullato' : '') + (finito ? ' passato' : ''),
+      role: 'listitem', 'aria-current': e.id === selectedId ? 'true' : null, 'data-giorno': g ? g.data : null,
       onclick: () => navigate('#/e/' + e.id)
     },
     h('span', { class: 'bar', style: { background: e.colore } }),
@@ -46,6 +61,8 @@ export function renderList(pane, selectedId) {
       h('div', { class: 't' }, e.titolo),
       h('div', { class: 'm' },
         isToday ? h('span', { class: 'tag today', style: { marginRight: '6px' } }, 'Oggi') : null,
+        multiGiorno ? h('span', { class: 'gg' }, 'Giorno ' + g.n + ' di ' + g.di) : null,
+        sovrapposto ? h('span', { class: 'lv lv-rosso', style: { marginRight: '6px' }, title: 'Una persona ha un altro impegno che si sovrappone in questa giornata' }, '⚠ Sovrapposizione') : null,
         e.stato === 'annullato' ? h('span', { class: 'tag danger', style: { marginRight: '6px' } }, 'Annullato') : null,
         meta),
       nomi),
@@ -60,10 +77,10 @@ export function renderList(pane, selectedId) {
     }
     const out = [];
     let month = '';
-    for (const e of evs) {
-      const ml = monthLabel(e.data);
+    for (const r of righe(evs)) {
+      const ml = monthLabel(r.data);
       if (ml !== month) { month = ml; out.push(h('div', { class: 'month label' }, ml)); }
-      out.push(row(e));
+      out.push(row(r.e, r.g));
     }
     listBox.replaceChildren(...out);
   }

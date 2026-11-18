@@ -232,6 +232,7 @@ var Users = (function () {
         var lostAccess = before.attivo !== out.attivo && out.attivo === 'FALSE';
         var demoted = ruoloDi(before) !== ruoloDi(out);
         if (nuovaEmail) {
+          Turni.rinomina(email, nuovaEmail, actor.email);
           Db.all('assegnazioni').forEach(function (r) {
             if (r.email === email) Db.update('assegnazioni', 'id', r.id, { email: nuovaEmail, aggiornata_il: Util.nowIso(), aggiornata_da: actor.email });
           });
@@ -285,6 +286,8 @@ var Users = (function () {
         if (r.stato === 'confermata') { Db.update('assegnazioni', 'id', r.id, { stato: 'rimossa', aggiornata_il: ora, aggiornata_da: actor.email }); tolte++; }
         else if (r.stato === 'proposta') Db.update('assegnazioni', 'id', r.id, { stato: 'decaduta', aggiornata_il: ora, aggiornata_da: actor.email });
       });
+      // i turni futuri spariscono con l'assegnazione; le giornate già svolte restano nello storico
+      Turni.togliFuturi(email, actor.email);
       Storico.log(actor.email, '', 'utenti', 'elimina', email, { ruolo: ruoloDi(u), nome: u.nome }, '');
       Accessi.log(email, 'eliminato', 'ok', '', etichettaRuolo(ruoloDi(u)) + (tolte ? ' · tolto da ' + tolte + ' event' + (tolte === 1 ? 'o' : 'i') : ''), actor.email);
       Staff.ricalcolaSicuro_();

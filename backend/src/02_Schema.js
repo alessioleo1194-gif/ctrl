@@ -6,7 +6,7 @@
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 7;
+var SCHEMA_VERSION = 8;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
@@ -48,7 +48,19 @@ var SCHEMA = {
   // staff assegnato agli eventi. stato: proposta (da confermare), confermata, scartata, rimossa, decaduta.
   // origine: calendario (trovato nella descrizione) o manuale. trovato/termine: dove e cosa è stato trovato.
   assegnazioni: ['id', 'evento_id', 'email', 'stato', 'origine', 'trovato', 'termine', 'creata_il', 'creata_da',
-    'aggiornata_il', 'aggiornata_da'],
+    'aggiornata_il', 'aggiornata_da',
+    // giorni_tutti: TRUE = lavora in tutte le giornate dell'evento (anche quelle che nascono dopo); FALSE = solo i turni indicati
+    'giorni_tutti'],
+  // giornate di un evento: una riga per evento e data. Gli orari in vigore sono ora_inizio/ora_fine; cal_* è l'ultimo orario
+  // letto dal Calendar, cal_base quello che il Calendar diceva quando l'orario è stato corretto a mano ("inizio|fine").
+  // origine: calendario (nata dal Calendar) o manuale (aggiunta a mano). origine_orario: calendario o manuale.
+  // stato: attiva · fuori_calendario (non più nel Calendar ma con modifiche o staff). Fine prima dell'inizio = finisce il giorno dopo.
+  giorni: ['id', 'evento_id', 'data', 'ora_inizio', 'ora_fine', 'origine', 'origine_orario', 'cal_inizio', 'cal_fine', 'cal_base',
+    'nota', 'stato', 'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione'],
+  // turni: una riga per tecnico e per giornata (è anche lo Staff Work Report: nessun archivio a parte).
+  // ora_inizio/ora_fine vuoti = segue la giornata. Orari sempre pianificati. Nessuna riga si cancella: eliminato.
+  turni: ['id', 'evento_id', 'giorno_id', 'email', 'ora_inizio', 'ora_fine', 'nota', 'eliminato', 'creato_il', 'creato_da',
+    'aggiornato_il', 'aggiornato_da', 'versione'],
   sessioni: ['hash', 'email', 'creata', 'scade', 'ultimo_uso', 'dispositivo'],
   condivisioni: ['id', 'hash', 'eventi', 'sezioni', 'mostra_contatti', 'scade', 'revocato', 'creato_da',
     'creato_il', 'ultimo_accesso', 'etichetta'],

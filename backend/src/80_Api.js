@@ -44,6 +44,14 @@ var ACTIONS = {
   'staff.evento': { fn: function (u, p) { return Staff.lista(u, p); } },
   'staff.gestisci': { fn: function (u, p) { return Staff.gestisci(u, p); } },
 
+  'staff.verifica': { fn: function (u, p) { return Turni.verifica(u, p); } },
+  'turni.salva': { fn: function (u, p) { return Turni.salva(u, p); } },
+
+  'giorni.salva': { fn: function (u, p) { return Giorni.salva(u, p); } },
+  'giorni.calendario': { fn: function (u, p) { return Giorni.calendario(u, p); } },
+  'giorni.aggiungi': { fn: function (u, p) { return Giorni.aggiungi(u, p); } },
+  'giorni.rimuovi': { fn: function (u, p) { return Giorni.rimuovi(u, p); } },
+
   'accesso.richieste': { fn: function (u) { return Richieste.lista(u); } },
   'accesso.gestisci': { fn: function (u, p) { return Richieste.gestisci(u, p); } },
   'accessi.list': { fn: function (u, p) { return Accessi.list(u, p); } }
