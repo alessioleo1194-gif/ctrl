@@ -1,5 +1,15 @@
 # Registro delle modifiche
 
+## 0.12.1 · Load-in/Load-out nell'anteprima e striscia tra una giornata e l'altra (anteprima su TEST)
+
+- **Elenco eventi**: nel riquadro dell'evento compaiono subito **Load-in** (bordo verde) e **Load-out** (bordo arancione), letti dal Production Plan giornata per giornata.
+  Più righe nello stesso giorno: Load-in = il più presto, Load-out = il più tardo; orari non leggibili ("TBD") si ignorano; se il piano non li ha, non compare nulla.
+  Li ricevono solo le persone che possono vedere i documenti dell'evento (Owner, staff assegnato). Nessuna scrittura: se cambi il piano, cambiano da soli.
+- **Giorni separati**: a ogni cambio di giorno c'è una striscia colorata con la data per esteso e il numero di eventi ("GIOVEDÌ 19 NOVEMBRE · 2 eventi"); oggi è evidenziata
+  a tinta piena, i giorni passati sono attenuati. Gli eventi dello stesso giorno restano insieme, ordinati per orario.
+- Nuovo campo `plan` in ogni giornata di `eventi.list` / `eventi.get`. Schema invariato: dopo l'aggiornamento di Apps Script basta una nuova versione del deployment (setup non necessario).
+- Test: 4 backend (`anteprima.test.mjs`), 3 e2e desktop+telefono (`anteprima.spec.mjs`).
+
 ## 0.12.0 · Staff Work Report, export Excel e statistiche sul nome (anteprima su TEST)
 
 - **Staff Work Report (solo Owner, icona nella barra in alto)**: una riga per tecnico e per giornata, letta dai turni — niente archivio a parte, quindi si aggiorna da solo con

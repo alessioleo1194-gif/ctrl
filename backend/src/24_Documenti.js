@@ -203,7 +203,40 @@ var Documenti = (function () {
     });
   }
 
-  return { TIPI: TIPI, CATALOGO_ATTIVITA: CATALOGO_ATTIVITA, get: get, salva: salva, salvaPdf: salvaPdf, pulisci: pulisci, riepilogo: function (pid) {
+  /** "9:00", "9.30", "09:00" → "09:00"; qualunque altra cosa ("TBD", "dopo il soundcheck") → "". */
+  function oraPlan_(v) {
+    var m = /^\s*(\d{1,2})\s*[:.h]\s*(\d{2})\s*$/.exec(String(v || ''));
+    if (!m) return '';
+    var o = ('0' + m[1]).slice(-2) + ':' + m[2];
+    return Util.isTime(o) ? o : '';
+  }
+
+  /**
+   * Orari di Load-in e Load-out scritti nel Production Plan, giornata per giornata: { 'yyyy-mm-dd': { load_in, load_out } }.
+   * Più righe nella stessa giornata: il Load-in è il più presto, il Load-out il più tardo. Orari non leggibili si ignorano.
+   * Serve all'anteprima dell'evento in elenco; non scrive nulla.
+   */
+  function orariPlan(pid) {
+    var out = {};
+    var doc = pid ? trovaDoc(String(pid), 'plan') : null;
+    var dati = doc ? leggi(doc) : null;
+    if (!dati || !Array.isArray(dati.giorni)) return out;
+    dati.giorni.forEach(function (g) {
+      if (!g || !Util.isDate(g.data)) return;
+      var inn = '', fuori = '';
+      (g.righe || []).forEach(function (r) {
+        var att = String((r && r.att) || '').toLowerCase().replace(/[\s_-]+/g, '');
+        var o = oraPlan_(r && r.ora);
+        if (!o) return;
+        if (att.indexOf('loadin') === 0 && (!inn || o < inn)) inn = o;
+        if (att.indexOf('loadout') === 0 && (!fuori || o > fuori)) fuori = o;
+      });
+      if (inn || fuori) out[g.data] = { load_in: inn, load_out: fuori };
+    });
+    return out;
+  }
+
+  return { TIPI: TIPI, CATALOGO_ATTIVITA: CATALOGO_ATTIVITA, orariPlan: orariPlan, get: get, salva: salva, salvaPdf: salvaPdf, pulisci: pulisci, riepilogo: function (pid) {
     var r = {};
     TIPI.forEach(function (tp) { var d = trovaDoc(pid, tp); r[tp] = d ? { versione: d.versione, aggiornato_il: d.aggiornato_il } : null; });
     return r;

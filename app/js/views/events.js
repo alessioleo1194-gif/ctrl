@@ -1,6 +1,6 @@
 import { h, icon } from '../ui.js';
 import { store, navigate } from '../app.js';
-import { dayParts, monthLabel, today, timeRange, shortDate, orarioGiornata } from '../format.js';
+import { dayParts, monthLabel, today, timeRange, shortDate, orarioGiornata, giornoLungo } from '../format.js';
 import { openEventForm } from './eventForm.js';
 import { staffNomi } from '../persone.js';
 
@@ -44,6 +44,13 @@ export function renderList(pane, selectedId) {
       icon('scheda', 'scheda' + (e.stato_doc.scheda ? ' on' : ''), e.stato_doc.scheda ? 'Scheda tecnica presente' : 'Scheda tecnica mancante'));
     const finito = (g ? g.data : (e.data_fine || e.data)) < t;
     const staff = g && g.staff ? g.staff : (e.staff || []);
+    // Load-in e Load-out dal Production Plan: sempre in vista nel riquadro
+    const pl = g && g.plan ? g.plan : null;
+    const loadInOut = pl && (pl.load_in || pl.load_out)
+      ? h('div', { class: 'lo', 'aria-label': 'Orari del piano di produzione' },
+        pl.load_in ? h('span', { class: 'lo-i', 'data-k': 'load-in' }, h('small', {}, 'Load-in'), h('b', {}, pl.load_in)) : null,
+        pl.load_out ? h('span', { class: 'lo-o', 'data-k': 'load-out' }, h('small', {}, 'Load-out'), h('b', {}, pl.load_out)) : null)
+      : null;
     const nomi = staff.length || e.da_confermare || !finito
       ? h('div', { class: 'names', 'aria-label': 'Staff' },
         staffNomi(staff),
@@ -65,6 +72,7 @@ export function renderList(pane, selectedId) {
         sovrapposto ? h('span', { class: 'lv lv-rosso', style: { marginRight: '6px' }, title: 'Una persona ha un altro impegno che si sovrappone in questa giornata' }, '⚠ Sovrapposizione') : null,
         e.stato === 'annullato' ? h('span', { class: 'tag danger', style: { marginRight: '6px' } }, 'Annullato') : null,
         meta),
+      loadInOut,
       nomi),
     ind);
   }
@@ -76,10 +84,22 @@ export function renderList(pane, selectedId) {
       return;
     }
     const out = [];
-    let month = '';
-    for (const r of righe(evs)) {
+    let month = '', giorno = '';
+    const rr = righe(evs);
+    const perGiorno = {};
+    rr.forEach(r => { perGiorno[r.data] = (perGiorno[r.data] || 0) + 1; });
+    for (const r of rr) {
       const ml = monthLabel(r.data);
       if (ml !== month) { month = ml; out.push(h('div', { class: 'month label' }, ml)); }
+      // una striscia colorata a ogni cambio di giorno: si vede subito dove finisce una giornata e inizia l'altra
+      if (r.data !== giorno) {
+        giorno = r.data;
+        const n = perGiorno[r.data];
+        out.push(h('div', { class: 'dsep' + (r.data === t ? ' oggi' : r.data < t ? ' passato' : ''), 'data-data': r.data, role: 'presentation' },
+          h('span', { class: 'dsep-d' }, giornoLungo(r.data)),
+          r.data === t ? h('span', { class: 'dsep-t' }, 'Oggi') : null,
+          h('span', { class: 'dsep-n' }, n === 1 ? '1 evento' : n + ' eventi')));
+      }
       out.push(row(r.e, r.g));
     }
     listBox.replaceChildren(...out);

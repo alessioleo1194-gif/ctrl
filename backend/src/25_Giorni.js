@@ -163,24 +163,33 @@ var Giorni = (function () {
     });
     var turniPer = Turni.perGiorno();
     var analisi = owner ? Turni.analizza() : null;
+    var planPer = {};
+    /** Load-in e Load-out del Production Plan, solo a chi può vedere i documenti dell'evento. */
+    function orariPlan(e, accesso) {
+      if (!accesso || !e.progetto_id) return {};
+      if (!planPer[e.progetto_id]) planPer[e.progetto_id] = Documenti.orariPlan(e.progetto_id);
+      return planPer[e.progetto_id];
+    }
     return {
       analisi: analisi,
       conflitti: function (eventoId) { return analisi ? analisi.sovrapposizioniEvento(eventoId) : 0; },
       di: function (e) {
         var righe = (perEv[e.id] || []).slice().sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : 0; });
         var accesso = st.accesso(e);
+        var plan = orariPlan(e, accesso);
         if (!righe.length) {
           // evento senza giornate scritte (non ancora allineato): si mostrano quelle previste, in sola lettura
           var calc = calGiorni(e);
           return calc.map(function (c, i) {
             return { id: '', n: i + 1, di: calc.length, data: c.data, ora_inizio: c.ora_inizio, ora_fine: c.ora_fine,
               dopo_mezzanotte: dopoMezzanotte(c.ora_inizio, c.ora_fine), origine: 'calendario', origine_orario: 'calendario',
-              cal_inizio: c.ora_inizio, cal_fine: c.ora_fine, diff: false, stato: 'attiva', nota: '', versione: '0', virtuale: true, staff: [] };
+              cal_inizio: c.ora_inizio, cal_fine: c.ora_fine, diff: false, stato: 'attiva', nota: '', versione: '0', virtuale: true, staff: [], plan: plan[c.data] || null };
           });
         }
         return righe.map(function (r, i) {
           var v = vistaBase(r, i + 1, righe.length, accesso);
           v.staff = Turni.staffGiorno(r.id, turniPer, owner, analisi);
+          v.plan = plan[r.data] || null;
           return v;
         });
       }

@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.12.0
+ * CTRL API · versione 0.12.1
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.12.0';
+var CTRL_VERSION = '0.12.1';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -2338,7 +2338,40 @@ var Documenti = (function () {
     });
   }
 
-  return { TIPI: TIPI, CATALOGO_ATTIVITA: CATALOGO_ATTIVITA, get: get, salva: salva, salvaPdf: salvaPdf, pulisci: pulisci, riepilogo: function (pid) {
+  /** "9:00", "9.30", "09:00" → "09:00"; qualunque altra cosa ("TBD", "dopo il soundcheck") → "". */
+  function oraPlan_(v) {
+    var m = /^\s*(\d{1,2})\s*[:.h]\s*(\d{2})\s*$/.exec(String(v || ''));
+    if (!m) return '';
+    var o = ('0' + m[1]).slice(-2) + ':' + m[2];
+    return Util.isTime(o) ? o : '';
+  }
+
+  /**
+   * Orari di Load-in e Load-out scritti nel Production Plan, giornata per giornata: { 'yyyy-mm-dd': { load_in, load_out } }.
+   * Più righe nella stessa giornata: il Load-in è il più presto, il Load-out il più tardo. Orari non leggibili si ignorano.
+   * Serve all'anteprima dell'evento in elenco; non scrive nulla.
+   */
+  function orariPlan(pid) {
+    var out = {};
+    var doc = pid ? trovaDoc(String(pid), 'plan') : null;
+    var dati = doc ? leggi(doc) : null;
+    if (!dati || !Array.isArray(dati.giorni)) return out;
+    dati.giorni.forEach(function (g) {
+      if (!g || !Util.isDate(g.data)) return;
+      var inn = '', fuori = '';
+      (g.righe || []).forEach(function (r) {
+        var att = String((r && r.att) || '').toLowerCase().replace(/[\s_-]+/g, '');
+        var o = oraPlan_(r && r.ora);
+        if (!o) return;
+        if (att.indexOf('loadin') === 0 && (!inn || o < inn)) inn = o;
+        if (att.indexOf('loadout') === 0 && (!fuori || o > fuori)) fuori = o;
+      });
+      if (inn || fuori) out[g.data] = { load_in: inn, load_out: fuori };
+    });
+    return out;
+  }
+
+  return { TIPI: TIPI, CATALOGO_ATTIVITA: CATALOGO_ATTIVITA, orariPlan: orariPlan, get: get, salva: salva, salvaPdf: salvaPdf, pulisci: pulisci, riepilogo: function (pid) {
     var r = {};
     TIPI.forEach(function (tp) { var d = trovaDoc(pid, tp); r[tp] = d ? { versione: d.versione, aggiornato_il: d.aggiornato_il } : null; });
     return r;
@@ -2511,24 +2544,33 @@ var Giorni = (function () {
     });
     var turniPer = Turni.perGiorno();
     var analisi = owner ? Turni.analizza() : null;
+    var planPer = {};
+    /** Load-in e Load-out del Production Plan, solo a chi può vedere i documenti dell'evento. */
+    function orariPlan(e, accesso) {
+      if (!accesso || !e.progetto_id) return {};
+      if (!planPer[e.progetto_id]) planPer[e.progetto_id] = Documenti.orariPlan(e.progetto_id);
+      return planPer[e.progetto_id];
+    }
     return {
       analisi: analisi,
       conflitti: function (eventoId) { return analisi ? analisi.sovrapposizioniEvento(eventoId) : 0; },
       di: function (e) {
         var righe = (perEv[e.id] || []).slice().sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : 0; });
         var accesso = st.accesso(e);
+        var plan = orariPlan(e, accesso);
         if (!righe.length) {
           // evento senza giornate scritte (non ancora allineato): si mostrano quelle previste, in sola lettura
           var calc = calGiorni(e);
           return calc.map(function (c, i) {
             return { id: '', n: i + 1, di: calc.length, data: c.data, ora_inizio: c.ora_inizio, ora_fine: c.ora_fine,
               dopo_mezzanotte: dopoMezzanotte(c.ora_inizio, c.ora_fine), origine: 'calendario', origine_orario: 'calendario',
-              cal_inizio: c.ora_inizio, cal_fine: c.ora_fine, diff: false, stato: 'attiva', nota: '', versione: '0', virtuale: true, staff: [] };
+              cal_inizio: c.ora_inizio, cal_fine: c.ora_fine, diff: false, stato: 'attiva', nota: '', versione: '0', virtuale: true, staff: [], plan: plan[c.data] || null };
           });
         }
         return righe.map(function (r, i) {
           var v = vistaBase(r, i + 1, righe.length, accesso);
           v.staff = Turni.staffGiorno(r.id, turniPer, owner, analisi);
+          v.plan = plan[r.data] || null;
           return v;
         });
       }
