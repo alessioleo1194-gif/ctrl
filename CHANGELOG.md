@@ -20,6 +20,7 @@ e **bloccando lo schermo**. Nessuna funzione, regola, ruolo o dato è cambiato.
 - **Ricerca**: la lista si ridisegna una volta sola quando ci si ferma un istante, non a ogni lettera.
 - **Correzione collaterale**: l'indicatore dei file nella lista si aggiorna anche quando evento aperto ed evento dell'elenco sono lo stesso oggetto (con test già esistente).
 - Test: 6 backend (`prestazioni.test.mjs`), 5 unit (`sw.test.mjs`), 8 e2e desktop+telefono (`prestazioni.spec.mjs`, con server finto lento). Misura delle letture dei fogli: `node scripts/perf-mock.mjs`.
+- **CI**: il controllo automatico falliva dalla 0.12.0 perché sul server mancava `openpyxl` (serve al test dell'export Excel); ora viene installato, e girano anche i test unitari.
 - Apps Script: nuova versione del deployment (schema invariato, setup non necessario). Il frontend resta compatibile con il server 0.12.1 (ripiega sulle chiamate separate).
 
 ## 0.12.1 · Load-in/Load-out nell'anteprima e striscia tra una giornata e l'altra (anteprima su TEST)
