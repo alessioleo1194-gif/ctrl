@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { h, toast, loading } from '../ui.js';
+import { h, toast, loading, riempi } from '../ui.js';
 import { upsertEvent, refreshList } from '../app.js';
 import { iniziali } from '../persone.js';
 import { giornoLungo, orarioGiornata } from '../format.js';
@@ -94,7 +94,7 @@ export function staffCard(ev, onChange) {
               : peg === 'stesso_giorno' ? `${nome} ha un altro evento nello stesso giorno, ma con orari compatibili.`
                 : `${nome} è libero nelle giornate scelte.`;
         const conf = peg === 'sovrapposizione' || peg === 'da_verificare';
-        azioni.replaceChildren(
+        riempi(azioni,
           h('button', { class: 'btn primary', type: 'button', disabled: !scelti.length, onclick: () => agisci(tipo, email, tuttiScelti(scelti)) },
             tipo === 'giorni' ? 'Salva giornate' : conf ? 'Assegna comunque' : 'Assegna'),
           conf && liberi.length && liberi.length < v.giorni.length
@@ -103,7 +103,7 @@ export function staffCard(ev, onChange) {
       }
       const tuttiScelti = (scelti) => scelti.length === v.giorni.length ? undefined : scelti.map(g => g.giorno_id);
 
-      box.replaceChildren(
+      riempi(box,
         h('h4', {}, tipo === 'giorni' ? 'Giornate di ' + nome : 'Assegna ' + nome),
         v.giorni.length > 1 ? h('p', { class: 'help', style: { margin: 0 } }, 'Scegli le giornate in cui lavora. Le giornate aggiunte in seguito vanno a chi lavora su tutte.') : null,
         lista, esito, azioni);

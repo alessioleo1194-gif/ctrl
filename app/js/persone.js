@@ -1,5 +1,6 @@
 import { h } from './ui.js';
 import { store } from './app.js';
+import { collegaStatistiche } from './stats-popup.js';
 
 /** Colori delle persone: stessi nomi del backend (COLORI_UTENTE). */
 export const COLORI = [['blu', 'Blu'], ['verde', 'Verde'], ['arancio', 'Arancio'], ['viola', 'Viola'], ['rosa', 'Rosa'], ['turchese', 'Turchese'], ['giallo', 'Giallo'], ['rosso', 'Rosso']];
@@ -16,7 +17,9 @@ export function iniziali(nome) {
 /** Etichetta colorata con il primo nome; piena se è la persona che sta guardando. */
 export function nomeTag(p) {
   const io = !!(p.id && store.user && p.id === store.user.id);
-  return h('span', { class: 'nm pc-' + p.colore + (io ? ' me' : ''), title: p.nome + (io ? ' (tu)' : '') }, primoNome(p.nome));
+  const el = h('span', { class: 'nm pc-' + p.colore + (io ? ' me' : ''), title: p.nome + (io ? ' (tu)' : '') }, primoNome(p.nome));
+  collegaStatistiche(el, p);     // solo Owner: statistiche del mese sul nome
+  return el;
 }
 
 /** Nomi dello staff per le card: i primi due e "+N". */

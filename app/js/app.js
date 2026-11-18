@@ -6,6 +6,7 @@ import { renderList } from './views/events.js';
 import { renderEvent } from './views/event.js';
 import { openEventForm } from './views/eventForm.js';
 import { renderSettings } from './views/settings.js';
+import { renderReport } from './views/report.js';
 import { renderPlan } from './views/plan.js';
 import { renderMateriali } from './views/materiali.js';
 
@@ -56,6 +57,7 @@ function topbar() {
     h('a', { class: 'brand', href: '#/', 'aria-label': 'CTRL, torna agli eventi' }, h('span', { class: 'keycap' }, 'CTRL')),
     env === 'test' ? h('span', { class: 'env-badge', title: 'Ambiente di prova: i dati non sono quelli reali' }, 'TEST') : null,
     h('div', { class: 'grow' }),
+    isAdmin ? h('a', { class: 'iconbtn', href: '#/report', title: 'Staff Work Report', 'aria-label': 'Staff Work Report' }, icon('report')) : null,
     isAdmin ? h('a', { class: 'iconbtn', href: '#/impostazioni', title: 'Impostazioni', 'aria-label': 'Impostazioni' }, icon('gear')) : null,
     h('button', { class: 'iconbtn', title: 'Esci', 'aria-label': 'Esci', onclick: logout }, icon('logout'))
   );
@@ -89,6 +91,13 @@ async function route() {
   if (!store.user) return;
   const hash = location.hash || '#/';
   const bar = topbar();
+
+  if (hash.startsWith('#/report')) {
+    if (!store.user.permessi.admin) return navigate('#/');
+    const main = h('main');
+    root.replaceChildren(bar, main);
+    return renderReport(main);
+  }
 
   if (hash.startsWith('#/impostazioni')) {
     if (!store.user.permessi.admin) return navigate('#/');

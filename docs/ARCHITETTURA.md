@@ -84,6 +84,12 @@ Le giornate non si cancellano (`eliminato`); una giornata tolta a mano non ritor
 `Turni.analizza` confronta i turni della stessa persona su eventi non annullati: sovrapposizione / da_verificare / stesso_giorno. Solo l'Owner vede orari dei
 turni, email e conflitti. I turni sono anche la base dello Staff Work Report (nessun archivio a parte).
 
+Staff Work Report (`27_Report.js`, `app/js/views/report.js`): `report.righe` (righe + totali + riepilogo per tecnico + valori per le tendine) e `report.statistiche`
+(numeri del popup sul nome: mese corrente, un conteggio per persona) leggono dai turni e richiedono `Users.require(user,'impostazioni')`, cioè solo Owner. Nessuna scrittura.
+Giornata "lavorata" = fine del turno passata (senza orari: dal giorno dopo); ore = ore pianificate dei turni conclusi; eventi annullati esclusi dai totali.
+L'Excel si costruisce nel browser (`app/js/xlsx.js`: ZIP senza compressione + XML, nessuna libreria; `report-xlsx.js`: i tre fogli con formule e valori già calcolati).
+Il popup (`app/js/stats-popup.js`) si aggancia a `nomeTag` solo se chi guarda è Owner: hover col mouse, tocco su touch (stopPropagation), bottom sheet sotto 700 px.
+
 ## Attività automatiche (trigger Apps Script)
 
 | Funzione | Quando | Cosa fa |

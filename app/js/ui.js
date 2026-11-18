@@ -22,6 +22,11 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
+/** Come replaceChildren ma senza scrivere "null" quando un elemento è assente (il DOM trasforma null in testo). */
+export function riempi(el, ...figli) {
+  el.replaceChildren(...figli.flat(Infinity).filter(c => c !== null && c !== undefined && c !== false));
+}
+
 const PATHS = {
   piano: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/>',
   materiale: '<path d="M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/>',
@@ -43,6 +48,7 @@ const PATHS = {
   download: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
   warn: '<path d="M12 3l10 18H2zM12 10v5M12 18v.5"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  report: '<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
 };

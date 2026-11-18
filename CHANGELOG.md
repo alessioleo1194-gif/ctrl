@@ -1,5 +1,19 @@
 # Registro delle modifiche
 
+## 0.12.0 · Staff Work Report, export Excel e statistiche sul nome (anteprima su TEST)
+
+- **Staff Work Report (solo Owner, icona nella barra in alto)**: una riga per tecnico e per giornata, letta dai turni — niente archivio a parte, quindi si aggiorna da solo con
+  assegnazioni, giornate e orari. Colonne: Data, Giorno, Tecnico, Evento, Location, Inizio, Fine, Durata, Nota. Filtri: anno, mese (di default il mese corrente), tecnico, evento, dal/al.
+  Un tocco sul tecnico (o sul suo riepilogo) mostra lo storico di quella persona. Si contano solo le **giornate** (nessuna distinzione eventi/giornate) e le ore **pianificate**.
+  Le giornate che finiscono dopo la mezzanotte restano nella data di inizio. Gli eventi annullati restano in elenco, barrati e segnalati, ma non entrano nei totali. Su telefono la tabella diventa a schede.
+- **Esporta report mensile (.xlsx)**: file Excel vero con tre fogli (WORK LOG, TECHNICIAN SUMMARY, EVENT SUMMARY), intestazione bloccata, filtri, formule per le ore e per i riepiloghi
+  (il file resta corretto se si cambia un orario), nome `STAFF_WORK_REPORT_NOVEMBER_2026.xlsx`. Gli eventi annullati non vengono esportati. Generato nel browser: nessun dato esce da CTRL.
+- **Popup sul nome (solo Owner)**: sul desktop passando il cursore, su telefono e tablet toccando il nome (non apre l'evento; si chiude con Esc, tocco fuori o X). Mostra, per il mese corrente:
+  Giornate lavorate, Giornate future, Ore lavorate (ore pianificate delle giornate già concluse; oggi conta come futura finché il turno non finisce). Dati riletti dal server, al massimo ogni 30 secondi.
+- Solo l'Owner: i controlli sono nel server (`report.righe`, `report.statistiche` rifiutano chiunque altro, anche con chiamata diretta). Nessun dato storico viene modificato o cancellato.
+- **Correzione (0.11.0)**: nella riga del turno di una giornata poteva comparire la scritta "null" (elemento assente scritto come testo). Corretto, con test.
+- Test: 9 backend (`report.test.mjs`), 4 unit sul file Excel (`xlsx.test.mjs`), 5 e2e desktop+telefono (`report.spec.mjs`, con download e verifica del contenuto del file).
+
 ## 0.11.0 · Giornate, orari modificabili e disponibilità dello staff (anteprima su TEST)
 
 - **Giornate**: ogni evento ha una sezione per giornata ("Giorno 2 di 3"), generata dal Calendar. Evento di un solo giorno = una giornata, anche se a cavallo della

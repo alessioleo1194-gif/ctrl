@@ -2,11 +2,11 @@
  * Rende l'app installabile e veloce ad aprirsi. Non salva MAI le risposte dell'API:
  * i dati arrivano sempre aggiornati dal server.
  */
-const VERSION = 'ctrl-0.11.0';
+const VERSION = 'ctrl-0.12.0';
 const SHELL = [
   '/', '/index.html', '/css/ctrl.css', '/manifest.webmanifest', '/icons/icon.svg',
   '/js/app.js', '/js/api.js', '/js/config.js', '/js/ui.js', '/js/format.js',
-  '/js/views/login.js', '/js/views/events.js', '/js/views/event.js', '/js/views/eventForm.js', '/js/views/settings.js'
+  '/js/views/login.js', '/js/views/events.js', '/js/views/event.js', '/js/views/eventForm.js', '/js/views/settings.js', '/js/views/report.js', '/js/stats-popup.js', '/js/xlsx.js', '/js/report-xlsx.js'
 ];
 
 self.addEventListener('install', (e) => {

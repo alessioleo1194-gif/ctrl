@@ -1,5 +1,5 @@
 import { api } from './api.js';
-import { h, icon, toast } from './ui.js';
+import { h, icon, toast, riempi } from './ui.js';
 import { store, upsertEvent } from './app.js';
 import { giornoLungo, orarioGiornata } from './format.js';
 import { normalizzaOra } from './orari.js';
@@ -156,7 +156,7 @@ export function giornateCard(ev, redraw) {
     const orario = orarioGiornata({ ora_inizio: ini, ora_fine: fin, dopo_mezzanotte: !!(ini && fin && fin <= ini) });
     const riga = h('div', { class: 'riga', 'data-email': s.email });
     const corpo = () => {
-      riga.replaceChildren(
+      riempi(riga,
         nomeTag(s),
         h('span', { class: 't' + (proprio ? ' proprio' : ''), title: proprio ? 'Orario del turno diverso dalla giornata' : 'Come la giornata' }, orario),
         chipLivello(s.livello),
@@ -203,7 +203,7 @@ export function giornateCard(ev, redraw) {
       const a = h('input', { class: 'input', placeholder: '--:--', inputmode: 'numeric', style: { width: '104px', textAlign: 'center' }, 'aria-label': 'Inizio' });
       const b = h('input', { class: 'input', placeholder: '--:--', inputmode: 'numeric', style: { width: '104px', textAlign: 'center' }, 'aria-label': 'Fine' });
       const st = h('span', { class: 'status-line' });
-      box.replaceChildren(
+      riempi(box,
         h('label', {}, 'Data', d), h('label', {}, 'Inizio', a), h('label', {}, 'Fine', b),
         h('button', { class: 'btn primary', type: 'button', onclick: async (e) => {
           const i = normalizzaOra(a.value), f = normalizzaOra(b.value);

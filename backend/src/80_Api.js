@@ -47,6 +47,9 @@ var ACTIONS = {
   'staff.verifica': { fn: function (u, p) { return Turni.verifica(u, p); } },
   'turni.salva': { fn: function (u, p) { return Turni.salva(u, p); } },
 
+  'report.righe': { fn: function (u, p) { return Report.righe(u, p); } },
+  'report.statistiche': { fn: function (u, p) { return Report.statistiche(u, p); } },
+
   'giorni.salva': { fn: function (u, p) { return Giorni.salva(u, p); } },
   'giorni.calendario': { fn: function (u, p) { return Giorni.calendario(u, p); } },
   'giorni.aggiungi': { fn: function (u, p) { return Giorni.aggiungi(u, p); } },

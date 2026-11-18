@@ -622,3 +622,50 @@ dialog.sheet .actions { display: flex; gap: 10px; justify-content: flex-end; fle
   .as-g input { width: 26px; height: 26px; }
   .as-azioni .btn, .g-azioni .btn { flex: 1 1 100%; }
 }
+
+/* Staff Work Report (solo Owner) */
+.report { max-width: 1240px; }
+.rp-griglia { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; }
+.rp-f { display: grid; gap: 4px; font-size: 12px; color: var(--mute); min-width: 0; }
+.rp-annullati { display: flex; gap: 10px; align-items: center; min-height: 44px; font-size: 14px; color: var(--text); grid-column: span 2; }
+.rp-num { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 6px; }
+.rp-num div { display: grid; gap: 2px; }
+.rp-num b { font: 600 26px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+.rp-num span { font-size: 12px; color: var(--mute); }
+.rp-tecs { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); }
+.rp-tec { display: grid; gap: 2px; text-align: left; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-s); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.rp-tec .mono { font-size: 12px; color: var(--mute); }
+.rp-tec.on { border-color: var(--accent); background: var(--accent-soft); }
+.rp-tabella { overflow-x: auto; }
+table.rp { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.rp th { text-align: left; font: 600 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--mute); padding: 10px 12px; background: var(--surface-2); border-bottom: 1px solid var(--line-strong); position: sticky; top: 0; white-space: nowrap; }
+table.rp td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.rp td .tag { margin-left: 6px; }
+table.rp tr.annullato td .v { color: var(--faint); text-decoration: line-through; }
+table.rp tr.annullato td .tag, table.rp tr.annullato td .v a { text-decoration: none; }
+table.rp td .tag { white-space: nowrap; }
+button.link { border: 0; background: none; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; text-align: left; min-height: 28px; }
+@media (max-width: 700px) {
+  .rp-annullati { grid-column: 1 / -1; }
+  table.rp thead { position: absolute; left: -9999px; }
+  table.rp, table.rp tbody, table.rp tr, table.rp td { display: block; }
+  table.rp tr { padding: 10px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
+  table.rp td { border: 0; padding: 0; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+  table.rp td.vuota { display: none; }
+  table.rp td::before { content: attr(data-label); font: 600 11px/1.6 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--mute); }
+  button.link { min-height: 44px; }
+  .rp-tec { flex: 1 1 100%; }
+}
+
+/* popup sul nome del tecnico (solo Owner) */
+.nm.has-stat { cursor: help; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
+.stat-pop { position: fixed; z-index: 60; width: 260px; max-width: calc(100vw - 16px); background: var(--surface); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0, 0, 0, .22); padding: 12px 14px; display: grid; gap: 8px; }
+.sp-testa { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; letter-spacing: .03em; }
+.sp-corpo { display: grid; gap: 6px; }
+.sp-dl { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 0; align-items: baseline; }
+.sp-dl dt { color: var(--mute); font-size: 13px; }
+.sp-dl dd { margin: 0; font: 600 15px/1.2 var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.stat-pop.sheet-m { left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; border-radius: 16px 16px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0px)); }
+.stat-pop.sheet-m .sp-dl dd { font-size: 18px; }
+.rp-f .input { min-width: 0; max-width: 100%; }
+.rp-f input[type="date"] { width: 100%; }
