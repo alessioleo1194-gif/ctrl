@@ -515,8 +515,7 @@ test('rete che cade durante il salvataggio: riprova da solo, nessun dato perso n
   expect(env.getSS(env.state.props.DB_ID).getSheetByName('documenti').rows().length).toBe(2);   // intestazione + un solo documento
 });
 
-test('sola lettura: vede i fogli e genera il documento, ma non può scrivere né salvare', async ({ page }, info) => {
-  test.skip(info.project.name === 'mobile', 'foglio a tastiera: sul telefono c\'è l\'editor a righe, provato a parte');
+test('sola lettura: il Viewer non ha il foglio del piano e il server rifiuta salvataggio e apertura', async ({ page }) => {
   const env = await setup(page);
   const adm = tokenFor(env, ADMIN);
   const evId = apiCall(env, adm, 'eventi.list', {}).data.find(e => e.titolo === 'Cantelmo: Maria Mazzotta').id;
@@ -525,16 +524,12 @@ test('sola lettura: vede i fogli e genera il documento, ma non può scrivere né
   apiCall(env, adm, 'utenti.save', { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'VIEWER' });
   apiCall(env, adm, 'staff.gestisci', { evento_id: evId, azione: 'aggiungi', email: 'tecnico@example.com' });
   await login(page, env, 'tecnico@example.com');
-  await page.getByText('Cantelmo: Maria Mazzotta').click();
-  await page.getByRole('link', { name: /Production Plan/ }).click();
-  await expect(page.getByRole('heading', { name: 'Production Plan' })).toBeVisible();
-  await expect(page.locator('.griglia input:not([readonly])')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
-  await expect(page.locator('.save-ind')).toHaveText('Sola lettura');
-  await page.getByRole('button', { name: 'Generate PdP' }).click();
-  await expect(page.locator('article.doc')).toContainText('Doors Open');
-  const r = apiCall(env, tokenFor(env, 'tecnico@example.com'), 'documento.salva', { produzione_id: p.id, tipo: 'plan', versione: '1', dati: { crew: [], giorni: [] } });
-  expect(r.ok).toBe(false);
+  await page.goto('/#/e/' + evId);
+  await expect(page.getByRole('heading', { name: 'Cantelmo: Maria Mazzotta' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Production Plan/ })).toHaveCount(0);
+  const t = tokenFor(env, 'tecnico@example.com');
+  expect(apiCall(env, t, 'documento.salva', { produzione_id: p.id, tipo: 'plan', versione: '1', dati: { crew: [], giorni: [] } }).error.code).toBe('FORBIDDEN');
+  expect(apiCall(env, t, 'documento.get', { produzione_id: p.id, tipo: 'plan' }).error.code).toBe('FORBIDDEN');
 });
 
 // ---------------- Material List ----------------
