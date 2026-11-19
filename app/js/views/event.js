@@ -138,6 +138,8 @@ function bloccatoCard() {
  * La produzione (che raggruppa gli eventi di un festival) si crea da sola alla prima apertura.
  */
 function produzioneCard(ev, p) {
+  // chi non può modificare non vede né crea Plan e Material List: legge e scarica i file allegati
+  if (!p.modificare) return null;
   // finché i dati completi non sono arrivati si conosce solo l'id della produzione (dall'elenco): i pulsanti funzionano già
   const inCaricamento = ev.produzione === undefined;
   const pr = inCaricamento ? (ev.produzione_id ? { id: ev.produzione_id, tipo: '', eventi: [], documenti: {} } : null) : ev.produzione;

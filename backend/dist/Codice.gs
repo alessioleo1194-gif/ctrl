@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.13.0
+ * CTRL API · versione 0.13.1
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.13.0';
+var CTRL_VERSION = '0.13.1';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -1615,7 +1615,8 @@ var Events = (function () {
       id: e.id, origine: e.origine, titolo: e.titolo, data: e.data, data_fine: e.data_fine || e.data,
       ora_inizio: e.ora_inizio, ora_fine: e.ora_fine, luogo: e.luogo, descrizione: e.descrizione,
       colore: e.colore || COLORE_DEFAULT, stato: e.stato, note: accesso ? e.note : '', versione: e.versione,
-      aggiornato_il: e.aggiornato_il, aggiornato_da: e.aggiornato_da, produzione_id: e.progetto_id || '',
+      aggiornato_il: e.aggiornato_il, aggiornato_da: e.aggiornato_da,
+      produzione_id: user && Users.can(user, 'modificare') ? (e.progetto_id || '') : '',   // Plan e Material List solo a chi li può modificare
       stato_doc: { piano: c.piano > 0, materiale: c.materiale > 0, scheda: c.scheda > 0 },
       staff: st.staff(e.id), mio: st.mio(e.id), accesso: accesso, da_confermare: st.daConfermare(e.id)
     };
@@ -1650,7 +1651,7 @@ var Events = (function () {
     var out = view(e, contaSezioni(), user, st, Giorni.perLista(user, st));
     // chi non è nello staff vede l'evento ma non file, documenti e note
     out.allegati = out.accesso ? Allegati.perEvento(e.id) : null;
-    out.produzione = out.accesso && e.progetto_id ? Produzioni.riepilogo(e.progetto_id) : null;
+    out.produzione = out.accesso && e.progetto_id && Users.can(user, 'modificare') ? Produzioni.riepilogo(e.progetto_id) : null;
     if (Users.can(user, 'admin')) out.storico = Storico.forEvent(e.id, 30);
     return out;
   }
@@ -2265,6 +2266,8 @@ var Documenti = (function () {
   }
 
   function get(user, p) {
+    // Production Plan e Material List si aprono solo a chi li può modificare; gli altri leggono i file allegati
+    Users.require(user, 'modificare');
     var tipo = tipoValido(p && p.tipo), pr = produzione(p && p.produzione_id);
     Staff.richiediProduzione(user, pr.id);
     var doc = trovaDoc(pr.id, tipo);

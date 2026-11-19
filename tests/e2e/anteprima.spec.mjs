@@ -73,6 +73,15 @@ test('elenco: Load-in e Load-out sempre visibili nel riquadro, solo dove il pian
   await expect(festa.locator('[data-k="load-out"]')).toHaveCount(0);
   await expect(page.locator('.ev', { hasText: 'Aperitivo in giardino' }).locator('.lo')).toHaveCount(0);
   await expect(page.locator('.ev', { hasText: 'Cena aziendale' }).locator('.lo')).toHaveCount(0);
+  // inizio e fine evento stanno negli stessi riquadri, accanto a Load-in e Load-out, e non si ripetono nella riga di testo
+  await expect(concerto.locator('[data-k="inizio"]')).toContainText('21:00');
+  await expect(concerto.locator('[data-k="fine"]')).toContainText('23:30');
+  expect(await concerto.locator('.lo > span').evaluateAll(x => x.map(e => e.dataset.k))).toEqual(['load-in', 'inizio', 'fine', 'load-out']);
+  await expect(concerto.locator('.m')).not.toContainText('21:00');
+  await expect(festa.locator('[data-k="inizio"]')).toContainText('20:00');
+  await expect(festa.locator('[data-k="fine"]')).toContainText('02:00');
+  // senza Load-in/Load-out l'orario resta nella riga di testo, come prima
+  await expect(page.locator('.ev', { hasText: 'Aperitivo in giardino' }).locator('.m')).toContainText('18:00');
   expect(await page.locator('[role=list]').innerText()).not.toMatch(/\b(null|undefined)\b/);
   const w = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
   expect(w[0]).toBeLessThanOrEqual(w[1]);

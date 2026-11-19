@@ -311,8 +311,16 @@ test('assegnato: Production lavora, Viewer legge, e solo sull\'evento (o produzi
   const pr = ok(call(env.ctx, 'produzione.assicura', { evento_id: e.id }, t.marco));
   ok(call(env.ctx, 'documento.salva', { produzione_id: pr.id, tipo: 'plan', versione: '0', dati: { crew: [], giorni: [] } }, t.marco));
 
-  // Viewer assegnato: legge e scarica, ma non modifica
-  assert.equal(ok(call(env.ctx, 'documento.get', { produzione_id: pr.id, tipo: 'plan' }, t.luca)).permessi.modificare, false);
+  // Viewer assegnato: vede l'evento, legge e scarica i file allegati; Plan e Material List non si aprono né si creano
+  assert.equal(call(env.ctx, 'documento.get', { produzione_id: pr.id, tipo: 'plan' }, t.luca).error.code, 'FORBIDDEN');
+  assert.equal(call(env.ctx, 'documento.get', { produzione_id: pr.id, tipo: 'materiali' }, t.luca).error.code, 'FORBIDDEN');
+  assert.equal(call(env.ctx, 'produzione.assicura', { evento_id: e.id }, t.luca).error.code, 'FORBIDDEN');
+  const vl = ok(call(env.ctx, 'eventi.get', { id: e.id }, t.luca));
+  assert.equal(vl.accesso, true);
+  assert.equal(vl.produzione, null, 'il Viewer non riceve nemmeno il riepilogo dei documenti');
+  assert.equal(vl.produzione_id, '');
+  assert.equal(ev(env, 'Cantelmo', t.luca).produzione_id, '');
+  assert.equal(ev(env, 'Cantelmo', t.marco).produzione_id, pr.id, 'chi lavora sul piano lo riceve');
   ok(call(env.ctx, 'allegati.scarica', { id: s.allegati[0].id }, t.luca));
   assert.equal(call(env.ctx, 'allegati.carica', file, t.luca).error.code, 'FORBIDDEN');
   assert.equal(call(env.ctx, 'documento.salva', { produzione_id: pr.id, tipo: 'plan', versione: '1', dati: {} }, t.luca).error.code, 'FORBIDDEN');

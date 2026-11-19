@@ -1158,26 +1158,34 @@ test('telefono · Material List: location, voci con quantità numerica, suggerim
   await noHorizontalScroll(page);
 });
 
-test('telefono · sola lettura: Viewer assegnato vede le righe ma non può aggiungere né aprire l\'editor', async ({ page }, info) => {
-  soloTelefono(info);
+test('Viewer assegnato: vede l\'evento e legge i file, ma non ha Production Plan né Material List (né crearli né aprirli)', async ({ page }) => {
   const env = await setup(page);
   const tok = tokenFor(env, ADMIN);
   apiCall(env, tok, 'utenti.save', { email: 'viewer@example.com', nome: 'Viola Viewer', ruolo: 'VIEWER' });
-  const ev = apiCall(env, tok, 'eventi.list', {}).data.find(e => e.titolo.startsWith('Cantelmo'));
-  apiCall(env, tok, 'staff.gestisci', { evento_id: ev.id, azione: 'aggiungi', email: 'viewer@example.com' });
-  const pr = apiCall(env, tok, 'produzione.assicura', { evento_id: ev.id }).data;
-  const doc = apiCall(env, tok, 'documento.get', { produzione_id: pr.id, tipo: 'plan' }).data;
-  apiCall(env, tok, 'documento.salva', { produzione_id: pr.id, tipo: 'plan', versione: doc.versione, dati: { lingua: 'en', crew: [], giorni: [{ id: 'g1', data: ev.data, righe: [{ id: 'x1', sez: '', ora: '21:00', att: 'Show Start', loc: 'Main Stage', note: '' }] }] } });
+  const evs = apiCall(env, tok, 'eventi.list', {}).data;
+  const ev = evs.find(e => e.titolo.startsWith('Cantelmo: Maria'));
+  const ev2 = evs.find(e => e.titolo.startsWith('Cantelmo: Swing'));
+  for (const e of [ev, ev2]) apiCall(env, tok, 'staff.gestisci', { evento_id: e.id, azione: 'aggiungi', email: 'viewer@example.com' });
+  const pr = apiCall(env, tok, 'produzione.assicura', { evento_id: ev.id }).data;   // ev ha già una produzione, ev2 no
+  apiCall(env, tok, 'allegati.carica', { evento_id: ev.id, sezione: 'scheda', nome: 'rider.pdf', mime: 'application/pdf', dati: Buffer.from('%PDF-1.4 x').toString('base64') });
   await login(page, env, 'viewer@example.com');
-  await page.getByText('Cantelmo: Maria Mazzotta').click();
-  await page.getByRole('link', { name: /Production Plan/ }).click();
-  await expect(page.getByRole('heading', { name: 'Production Plan' })).toBeVisible();
-  const prog = page.locator('.righe-m.sola').nth(1);
-  await expect(prog.locator('.rm-riga')).toHaveCount(1);
-  await expect(prog.locator('.rm-riga')).toContainText('Show Start');
-  await expect(page.getByRole('button', { name: /Aggiungi riga/ })).toHaveCount(0);
-  await prog.locator('.rm-riga').click({ force: true });
-  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  for (const [t, e] of [['Cantelmo: Maria Mazzotta', ev], ['Cantelmo: Swing night', ev2]]) {
+    await page.goto('/#/e/' + e.id);
+    await expect(page.getByRole('heading', { name: t })).toBeVisible();
+    await expect(page.getByText('File allegati')).toBeVisible();
+    await page.waitForTimeout(600);   // arrivano anche i dati completi
+    await expect(page.getByText('Documenti di produzione')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Production Plan|Material List/ })).toHaveCount(0);
+    await expect(page.locator('.doc-btn')).toHaveCount(0);
+  }
+  // i file allegati si leggono e si scaricano
+  await page.goto('/#/e/' + ev.id);
+  await expect(page.getByText('rider.pdf')).toBeVisible();
+  // aprire il foglio a mano dall'indirizzo non serve a niente: il server lo rifiuta
+  await page.goto('/#/p/' + pr.id + '/plan');
+  await expect(page.getByText('Non hai i permessi')).toBeVisible();
+  await expect(page.locator('.griglia, .righe-m')).toHaveCount(0);
+  expect(apiCall(env, tokenFor(env, 'viewer@example.com'), 'produzione.assicura', { evento_id: ev2.id }).error.code).toBe('FORBIDDEN');
 });
 
 /** Misure da telefono: nessuno scroll di lato, tocchi da 44 px, campi a 16 px. Vale per ogni schermata principale. */

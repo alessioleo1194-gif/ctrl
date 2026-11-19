@@ -127,6 +127,8 @@ var Documenti = (function () {
   }
 
   function get(user, p) {
+    // Production Plan e Material List si aprono solo a chi li può modificare; gli altri leggono i file allegati
+    Users.require(user, 'modificare');
     var tipo = tipoValido(p && p.tipo), pr = produzione(p && p.produzione_id);
     Staff.richiediProduzione(user, pr.id);
     var doc = trovaDoc(pr.id, tipo);

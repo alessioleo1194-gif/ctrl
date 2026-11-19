@@ -101,16 +101,19 @@ test('conflitto: una versione vecchia non scrive e restituisce il documento attu
   assert.equal(ok(get(env, p.id, 'plan')).dati.crew[0].nome, 'Mario Rossi');
 });
 
-test('permessi: la lettura legge ma non salva né crea la produzione', () => {
+test('permessi: il Viewer non apre, non salva e non crea Plan e Material List; con il permesso "modifica" sì', () => {
   const env = boot();
   const p = assicura(env);
   ok(salvaDoc(env, p.id, 'plan', '0', PLAN()));
   const lett = utente(env, 'tecnico@example.com', 'VIEWER');
   assegna(env, 'Cantelmo', 'tecnico@example.com');
-  assert.equal(ok(get(env, p.id, 'plan', lett)).dati.crew.length, 1);
-  assert.equal(ok(get(env, p.id, 'plan', lett)).permessi.modificare, false);
-  assert.equal(salvaDoc(env, p.id, 'plan', '1', PLAN(), lett).ok, false);
-  assert.equal(call(env.ctx, 'produzione.assicura', { evento_id: env.ev('Festival').id }, lett).ok, false);
+  for (const tipo of ['plan', 'materiali']) assert.equal(get(env, p.id, tipo, lett).error.code, 'FORBIDDEN');
+  assert.equal(salvaDoc(env, p.id, 'plan', '1', PLAN(), lett).error.code, 'FORBIDDEN');
+  assert.equal(call(env.ctx, 'produzione.assicura', { evento_id: env.ev('Festival').id }, lett).error.code, 'FORBIDDEN');
+  assert.equal(call(env.ctx, 'produzione.assicura', { evento_id: env.ev('Cantelmo').id }, lett).error.code, 'FORBIDDEN');
+  // il permesso particolare "modifica" riapre il documento
+  ok(call(env.ctx, 'utenti.save', { email: 'tecnico@example.com', nome: 'Tecnico', ruolo: 'VIEWER', permessi_extra: ['modifica'] }, env.token));
+  assert.equal(ok(get(env, p.id, 'plan', lett)).permessi.modificare, true);
   assert.equal(call(env.ctx, 'documento.get', { produzione_id: p.id, tipo: 'plan' }, 'token-falso').ok, false);
 });
 

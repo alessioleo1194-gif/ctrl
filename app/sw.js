@@ -6,7 +6,7 @@
  * ATTENZIONE: i file sono serviti dalla cache finché VERSION non cambia. Ogni modifica a qualunque file di app/
  * richiede di aumentare VERSION (il test tests/unit/sw.test.mjs controlla che l'elenco sia completo).
  */
-const VERSION = 'ctrl-0.13.0';
+const VERSION = 'ctrl-0.13.1';
 const SHELL = [
   '/',
   '/index.html',

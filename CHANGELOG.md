@@ -1,5 +1,15 @@
 # Registro delle modifiche
 
+## 0.13.1 · Il Viewer non ha Plan e Material List; inizio/fine evento accanto a Load-in e Load-out (anteprima su TEST)
+
+- **Viewer (ospite)**: vede solo gli eventi a cui è assegnato e legge/scarica i file allegati. Production Plan e Material List non compaiono più
+  (prima c'erano i pulsanti "Da compilare" e si aprivano i fogli in sola lettura). Il blocco è anche nel server: `documento.get` e `produzione.assicura`
+  rispondono FORBIDDEN, e `eventi.get` non restituisce più il riepilogo dei documenti né l'id della produzione. Chi ha il permesso particolare "modifica"
+  (o è Production/Owner) non cambia. Gli indicatori piano/materiale nell'elenco restano: indicano i PDF allegati.
+- **Anteprima evento**: quando ci sono Load-in o Load-out, anche **Inizio** e **Fine** evento diventano riquadri nello stesso blocco
+  (Load-in · Inizio · Fine · Load-out), senza ripetere l'orario nella riga di testo e senza che il luogo lo tagli. Senza Load-in/Load-out resta la riga di testo di prima.
+- Test: Viewer (server e interfaccia, desktop e telefono), riquadri degli orari. Aggiornati i test che davano al Viewer la lettura dei fogli.
+
 ## 0.13.0 · Prestazioni: avvio in una chiamata, eventi che si aprono subito, cache dell'interfaccia (anteprima su TEST)
 
 Causa principale: ogni chiamata ad Apps Script costa **1,2–1,9 s anche quando non fa quasi nulla** (misurato sul server di test), e l'app ne faceva molte **in fila**
