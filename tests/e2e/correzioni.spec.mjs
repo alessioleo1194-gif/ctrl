@@ -105,6 +105,6 @@ test('evento del Calendar: Production e Viewer non hanno Modifica; il Viewer ved
   await expect(page.getByRole('button', { name: 'Modifica' })).toHaveCount(0);
   // l'orario corretto nella giornata è quello che si legge nell'evento
   await expect(page.locator('dt', { hasText: 'Orario' }).locator('xpath=following-sibling::dd[1]')).toHaveText('19:00–23:00');
-  await expect(page.getByText('Modificato da te')).toHaveCount(0);
+  await expect(page.locator('.corr')).toHaveCount(0);   // le correzioni coi valori del Calendar sono dell'Owner
   await expect(page.getByText('Salento Jaz')).toHaveCount(0);
 });
