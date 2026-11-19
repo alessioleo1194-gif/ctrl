@@ -689,5 +689,7 @@ button.link { border: 0; background: none; padding: 0; font: inherit; font-weigh
 .ev .lo b { font: 700 13px/1.2 var(--mono); font-variant-numeric: tabular-nums; color: var(--text); }
 .ev .lo .lo-i { border-left: 3px solid var(--ok); }
 .ev .lo .lo-o { border-left: 3px solid var(--mat); }
-.ev .lo .lo-e { border-left: 3px solid var(--mute); }
 @media (max-width: 700px) { .ev .lo b { font-size: 15px; } .dsep { padding: 9px 16px; } }
+
+.corr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; }
+.corr .alert-lv { flex: 1 1 100%; }

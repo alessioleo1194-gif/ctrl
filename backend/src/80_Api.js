@@ -18,6 +18,7 @@ var ACTIONS = {
   'eventi.get': { fn: function (u, p) { return Events.get(u, p); } },
   'eventi.create': { fn: function (u, p) { return Events.create(u, p); } },
   'eventi.update': { fn: function (u, p) { return Events.update(u, p); } },
+  'eventi.calendario': { fn: function (u, p) { return Events.calendario(u, p); } },
   'eventi.stato': { fn: function (u, p) { return Events.setStato(u, p); } },
 
   'allegati.carica': { fn: function (u, p) { return Allegati.carica(u, p); } },

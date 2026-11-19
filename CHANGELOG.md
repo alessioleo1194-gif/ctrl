@@ -1,14 +1,19 @@
 # Registro delle modifiche
 
-## 0.13.1 · Il Viewer non ha Plan e Material List; inizio/fine evento accanto a Load-in e Load-out (anteprima su TEST)
+## 0.13.2 · Dati del Calendar correggibili, orario unico in elenco, il Viewer senza Plan e Material List
 
+- **Correggere i dati del Calendar** (solo Owner): titolo, data/e, luogo e descrizione di un evento del Calendar si cambiano con **Modifica**. La correzione resta anche dopo la sincronizzazione.
+  Sotto il dato corretto si vede «Modificato da te» e cosa diceva il Calendar, con **Ripristina Calendar**. Se il Calendar cambia quello stesso dato compare un avviso con **Tieni il mio** / **Usa quello del Calendar**
+  (come già per gli orari delle giornate). Se il Calendar arriva da solo al valore che avevi scritto, la correzione decade. Il Calendar non viene mai modificato.
+  Gli orari si correggono nella giornata, il colore resta quello del Calendar. Le date corrette ricalcolano le giornate; la descrizione corretta aggiorna le proposte staff.
+  Server: colonne `modificati` e `cal_diff` in `eventi` (schema 9, da `setup`), azione `eventi.calendario`, `eventi.update` accetta i cinque campi anche per eventi del Calendar.
+- **Anteprima in elenco**: l'orario compare una volta sola, come **Load-in** (inizio) e **Load-out** (fine) della giornata, quindi segue le correzioni che fai. Niente più riga di testo con lo stesso orario
+  né riquadri Inizio/Fine. Il Production Plan non cambia l'anteprima. Nel dettaglio, «Orario» mostra quello della giornata se è una sola.
 - **Viewer (ospite)**: vede solo gli eventi a cui è assegnato e legge/scarica i file allegati. Production Plan e Material List non compaiono più
   (prima c'erano i pulsanti "Da compilare" e si aprivano i fogli in sola lettura). Il blocco è anche nel server: `documento.get` e `produzione.assicura`
   rispondono FORBIDDEN, e `eventi.get` non restituisce più il riepilogo dei documenti né l'id della produzione. Chi ha il permesso particolare "modifica"
   (o è Production/Owner) non cambia. Gli indicatori piano/materiale nell'elenco restano: indicano i PDF allegati.
-- **Anteprima evento**: quando ci sono Load-in o Load-out, anche **Inizio** e **Fine** evento diventano riquadri nello stesso blocco
-  (Load-in · Inizio · Fine · Load-out), senza ripetere l'orario nella riga di testo e senza che il luogo lo tagli. Senza Load-in/Load-out resta la riga di testo di prima.
-- Test: Viewer (server e interfaccia, desktop e telefono), riquadri degli orari. Aggiornati i test che davano al Viewer la lettura dei fogli.
+- Test: correzioni (server e interfaccia), Viewer (server e interfaccia, desktop e telefono), orario unico in elenco.
 
 ## 0.13.0 · Prestazioni: avvio in una chiamata, eventi che si aprono subito, cache dell'interfaccia (anteprima su TEST)
 

@@ -3,7 +3,7 @@
  *
  * Finestra: da 30 giorni fa a 365 giorni avanti.
  * - evento nuovo        → creato in CTRL (origine "calendar")
- * - evento cambiato     → aggiornati titolo, date, orari, luogo, descrizione, colore
+ * - evento cambiato     → aggiornati titolo, date, orari, luogo, descrizione, colore (tranne i dati corretti a mano in CTRL: se il Calendar cambia si segnala)
  * - evento sparito      → stato "annullato" (piano e materiale restano)
  * - evento ricomparso   → di nuovo "attivo"
  * - eventi "archiviati" e manuali non vengono mai toccati.
@@ -92,8 +92,7 @@ var CalendarSync = (function () {
           res.creati++;
           return;
         }
-        var patch = {};
-        Events.CAL_FIELDS.forEach(function (k) { if ((row[k] || '') !== (f[k] || '')) patch[k] = f[k]; });
+        var patch = Events.patchSync(row, f);   // i dati corretti a mano in CTRL non si toccano
         var rigaFinale = row;
         var reactivate = row.stato === 'annullato';
         if (reactivate) patch.stato = 'attivo';

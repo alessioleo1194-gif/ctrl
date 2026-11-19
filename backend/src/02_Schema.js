@@ -6,12 +6,14 @@
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 8;
+var SCHEMA_VERSION = 9;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
     'descrizione', 'colore', 'progetto_id', 'cartella_id', 'stato', 'note',
-    'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'versione', 'sync_il'],
+    'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'versione', 'sync_il',
+    // correzioni a mano di un evento del Calendar: modificati = { campo: valore che diceva il Calendar }, cal_diff = { campo: nuovo valore del Calendar } (JSON)
+    'modificati', 'cal_diff'],
   // programma della produzione (Production Schedule). evento_id resta per compatibilità, non si usa più.
   attivita: ['id', 'evento_id', 'ora_inizio', 'ora_fine', 'attivita', 'responsabile', 'note', 'ordine',
     'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione', 'progetto_id', 'giornata_id', 'spazio_id', 'tipo'],

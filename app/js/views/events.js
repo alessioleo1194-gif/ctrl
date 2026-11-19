@@ -1,6 +1,6 @@
 import { h, icon } from '../ui.js';
 import { store, navigate } from '../app.js';
-import { dayParts, monthLabel, today, timeRange, shortDate, orarioGiornata, giornoLungo } from '../format.js';
+import { dayParts, monthLabel, today, timeRange, shortDate, giornoLungo } from '../format.js';
 import { openEventForm } from './eventForm.js';
 import { staffNomi } from '../persone.js';
 
@@ -35,12 +35,10 @@ export function renderList(pane, selectedId) {
     const multiGiorno = !!(g && g.di > 1);
     const p = dayParts(g ? g.data : e.data);
     const isToday = g ? g.data === t : (e.data <= t && (e.data_fine || e.data) >= t);
-    const orarioTesto = g ? (g.ora_inizio || g.ora_fine ? orarioGiornata(g) : '') : timeRange(e);
+    // L'orario compare una volta sola: inizio = Load-in, fine = Load-out, quelli della giornata (corretti da te se il Calendar sbaglia)
     const inizio = (g ? g.ora_inizio : e.ora_inizio) || '', fine = (g ? g.ora_fine : e.ora_fine) || '';
-    const pl = g && g.plan ? g.plan : null;
-    // con Load-in/Load-out in vista, anche inizio e fine evento diventano riquadri: tutti e quattro sempre leggibili, mai tagliati
-    const conLoad = !!(pl && (pl.load_in || pl.load_out));
-    const orario = conLoad && (inizio || fine) ? '' : orarioTesto;
+    const dopoMezzanotte = !!(g ? g.dopo_mezzanotte : (inizio && fine && fine <= inizio));
+    const orario = inizio || fine ? '' : (g ? '' : timeRange(e));
     const multi = !g && e.data_fine && e.data_fine !== e.data ? 'fino al ' + shortDate(e.data_fine) : '';
     const meta = [multi, orario, e.luogo].filter(Boolean).join(' · ') || (e.origine === 'manuale' ? 'Evento manuale' : '—');
     const sovrapposto = !!(g && g.staff && g.staff.some(x => x.livello === 'sovrapposizione'));
@@ -50,13 +48,10 @@ export function renderList(pane, selectedId) {
       icon('scheda', 'scheda' + (e.stato_doc.scheda ? ' on' : ''), e.stato_doc.scheda ? 'Scheda tecnica presente' : 'Scheda tecnica mancante'));
     const finito = (g ? g.data : (e.data_fine || e.data)) < t;
     const staff = g && g.staff ? g.staff : (e.staff || []);
-    // Load-in e Load-out dal Production Plan (con inizio e fine evento) sempre in vista nel riquadro
-    const loadInOut = conLoad
-      ? h('div', { class: 'lo', 'aria-label': 'Orari della giornata' },
-        pl.load_in ? h('span', { class: 'lo-i', 'data-k': 'load-in' }, h('small', {}, 'Load-in'), h('b', {}, pl.load_in)) : null,
-        inizio ? h('span', { class: 'lo-e', 'data-k': 'inizio' }, h('small', {}, 'Inizio'), h('b', {}, inizio)) : null,
-        fine ? h('span', { class: 'lo-e', 'data-k': 'fine' }, h('small', {}, 'Fine'), h('b', {}, fine + (g && g.dopo_mezzanotte ? ' +1' : ''))) : null,
-        pl.load_out ? h('span', { class: 'lo-o', 'data-k': 'load-out' }, h('small', {}, 'Load-out'), h('b', {}, pl.load_out)) : null)
+    const loadInOut = inizio || fine
+      ? h('div', { class: 'lo', 'aria-label': 'Orario' },
+        inizio ? h('span', { class: 'lo-i', 'data-k': 'load-in' }, h('small', {}, 'Load-in'), h('b', {}, inizio)) : null,
+        fine ? h('span', { class: 'lo-o', 'data-k': 'load-out' }, h('small', {}, 'Load-out'), h('b', {}, fine + (dopoMezzanotte ? ' +1' : ''))) : null)
       : null;
     const nomi = staff.length || e.da_confermare || !finito
       ? h('div', { class: 'names', 'aria-label': 'Staff' },

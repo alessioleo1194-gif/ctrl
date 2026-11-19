@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { h, icon, toast, loading } from '../ui.js';
 import { store, navigate, upsertEvent } from '../app.js';
-import { dateRange, timeRange, stamp } from '../format.js';
+import { dateRange, timeRange, orarioGiornata, stamp } from '../format.js';
 import { openEventForm } from './eventForm.js';
 import { allegatiCard } from './allegati.js';
 import { staffCard } from './staff.js';
@@ -11,6 +11,13 @@ import { nomeTag } from '../persone.js';
 /** I campi che arrivano solo da eventi.get: il resto è già nell'elenco e si mostra subito. */
 const EXTRA = ['allegati', 'produzione', 'storico'];
 const nucleo = (ev) => JSON.stringify(ev, (k, v) => (EXTRA.includes(k) ? undefined : v));
+
+/** Orario dell'evento: se c'è una sola giornata vale quello della giornata (corretto da te se il Calendar sbaglia). */
+function orarioEvento(ev) {
+  const gg = ev.giorni || [];
+  if (gg.length === 1 && (gg[0].ora_inizio || gg[0].ora_fine)) return orarioGiornata(gg[0]);
+  return timeRange(ev);
+}
 
 let aperture = 0;   // conta le aperture: una risposta in ritardo di un evento già chiuso non deve ridisegnare nulla
 
@@ -78,21 +85,45 @@ function draw(pane, ev, extra) {
     h('h1', {}, ev.titolo),
     h('div', { class: 'detail-meta' },
       h('span', {}, dateRange(ev)),
-      timeRange(ev) ? h('span', { class: 'mono' }, timeRange(ev)) : null,
+      orarioEvento(ev) ? h('span', { class: 'mono' }, orarioEvento(ev)) : null,
       ev.luogo ? h('span', {}, ev.luogo) : null));
 
   const mapsUrl = ev.luogo ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(ev.luogo) : null;
+  const corr = ev.correzioni || {};
+  const daCal = ev.origine === 'calendar';
+  const chiama = async (campo, scelta) => {
+    try { const upd = await api('eventi.calendario', { id: ev.id, campo, scelta }); upsertEvent(upd); draw(pane, upd); toast(scelta === 'usa' ? 'Torna il dato del Calendar' : 'Tengo il tuo dato'); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  const NOMI = { titolo: 'Titolo', data: 'Data', data_fine: 'Fine', luogo: 'Luogo', descrizione: 'Descrizione' };
+  const mostra = (v) => v || '—';
+  /** Sotto un dato corretto a mano: cosa diceva il Calendar, e se nel frattempo è cambiato, la scelta. */
+  const nota = (...campi) => {
+    const mod = campi.filter(k => corr[k]);
+    if (!mod.length) return null;
+    const diff = mod.filter(k => corr[k].nuovo !== null);
+    return h('div', { class: 'corr' },
+      h('span', { class: 'tag warn' }, 'Modificato da te'),
+      h('span', { class: 'help' }, mod.map(k => (campi.length > 1 ? NOMI[k] + ' ' : '') + 'Calendar: ' + mostra(corr[k].calendario)).join(' · ')),
+      p.creareEventi ? h('button', { class: 'btn sm', type: 'button', onclick: () => Promise.all(mod.map(k => api('eventi.calendario', { id: ev.id, campo: k, scelta: 'usa' }).then(upd => (ev = upd)))).then(() => { upsertEvent(ev); draw(pane, ev); toast('Torna il dato del Calendar'); }).catch(e => toast(e.message, 'err')) }, 'Ripristina Calendar') : null,
+      diff.map(k => h('div', { class: 'alert-lv lv-arancio' },
+        h('div', {}, h('b', {}, 'Il Calendar è cambiato. '), NOMI[k] + ': ora dice «', h('b', {}, mostra(corr[k].nuovo)), '»; tu hai «', h('b', {}, mostra(ev[k])), '».'),
+        p.creareEventi ? h('div', { class: 'row' },
+          h('button', { class: 'btn sm', type: 'button', onclick: () => chiama(k, 'tieni') }, 'Tieni il mio'),
+          h('button', { class: 'btn sm primary', type: 'button', onclick: () => chiama(k, 'usa') }, 'Usa quello del Calendar')) : null)));
+  };
   const info = h('section', { class: 'card' },
     h('header', {}, h('span', { class: 'label' }, 'Informazioni'),
-      p.creareEventi && ev.origine === 'manuale' ? h('button', { class: 'btn', onclick: () => openEventForm(ev, (upd) => draw(pane, upd)) }, icon('edit'), 'Modifica') : null),
+      p.creareEventi ? h('button', { class: 'btn', onclick: () => openEventForm(ev, (upd) => draw(pane, upd)) }, icon('edit'), 'Modifica') : null),
     h('div', { class: 'in' },
       h('dl', { class: 'kv' },
-        h('dt', {}, 'Data'), h('dd', {}, dateRange(ev)),
-        h('dt', {}, 'Orario'), h('dd', { class: 'mono' }, timeRange(ev) || 'Tutto il giorno'),
-        h('dt', {}, 'Luogo'), h('dd', {}, ev.luogo ? h('a', { href: mapsUrl, target: '_blank', rel: 'noopener' }, ev.luogo) : '—'),
-        h('dt', {}, 'Descrizione'), h('dd', { class: 'pre' }, ev.descrizione || '—'),
+        h('dt', {}, 'Titolo'), h('dd', {}, ev.titolo, nota('titolo')),
+        h('dt', {}, 'Data'), h('dd', {}, dateRange(ev), nota('data', 'data_fine')),
+        h('dt', {}, 'Orario'), h('dd', { class: 'mono' }, orarioEvento(ev) || 'Tutto il giorno'),
+        h('dt', {}, 'Luogo'), h('dd', {}, ev.luogo ? h('a', { href: mapsUrl, target: '_blank', rel: 'noopener' }, ev.luogo) : '—', nota('luogo')),
+        h('dt', {}, 'Descrizione'), h('dd', { class: 'pre' }, ev.descrizione || '—', nota('descrizione')),
         p.admin ? null : [h('dt', {}, 'Staff'), h('dd', {}, (ev.staff || []).length ? h('div', { class: 'names', style: { marginTop: 0 } }, ev.staff.map(nomeTag)) : '—')],
-        ev.origine === 'calendar' ? [h('dt', {}, 'Fonte'), h('dd', { class: 'help' }, 'Titolo, date, orari, luogo e descrizione si modificano dal Google Calendar e si aggiornano qui ogni ora.')] : null)));
+        daCal ? [h('dt', {}, 'Fonte'), h('dd', { class: 'help' }, 'Arriva dal Google Calendar, che CTRL legge soltanto. Titolo, data, luogo e descrizione si correggono con Modifica, gli orari nella giornata: le tue correzioni restano anche quando il Calendar si aggiorna, e se il Calendar cambia lo stesso dato ti viene segnalato.')] : null)));
 
   // chi non è nello staff vede l'evento ma non documenti, file e note
   const bloccato = ev.accesso === false;

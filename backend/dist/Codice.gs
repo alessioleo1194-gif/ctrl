@@ -1,5 +1,5 @@
 /**
- * CTRL API · versione 0.13.1
+ * CTRL API · versione 0.13.2
  * FILE GENERATO da scripts/build-backend.mjs a partire da backend/src: non modificarlo a mano.
  * Per aggiornare il server: incolla tutto il contenuto al posto di Codice.gs nell'editor Apps Script,
  * salva, poi Esegui il deployment > Gestisci deployment > modifica > Nuova versione.
@@ -14,7 +14,7 @@
  * impostate una sola volta dalle funzioni setupProduzione() / setupTest()
  * in 90_Setup.js.
  */
-var CTRL_VERSION = '0.13.1';
+var CTRL_VERSION = '0.13.2';
 var CTRL_TZ = 'Europe/Rome';
 
 var Config = (function () {
@@ -203,12 +203,14 @@ var Util = (function () {
  * - ogni cella è testo (formato "@"), così id, date e orari non vengono convertiti;
  * - nessuna riga viene cancellata: si usa stato/eliminato.
  */
-var SCHEMA_VERSION = 8;
+var SCHEMA_VERSION = 9;
 
 var SCHEMA = {
   eventi: ['id', 'origine', 'cal_key', 'titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo',
     'descrizione', 'colore', 'progetto_id', 'cartella_id', 'stato', 'note',
-    'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'versione', 'sync_il'],
+    'creato_il', 'creato_da', 'aggiornato_il', 'aggiornato_da', 'versione', 'sync_il',
+    // correzioni a mano di un evento del Calendar: modificati = { campo: valore che diceva il Calendar }, cal_diff = { campo: nuovo valore del Calendar } (JSON)
+    'modificati', 'cal_diff'],
   // programma della produzione (Production Schedule). evento_id resta per compatibilità, non si usa più.
   attivita: ['id', 'evento_id', 'ora_inizio', 'ora_fine', 'attivita', 'responsabile', 'note', 'ordine',
     'eliminato', 'creato_il', 'aggiornato_il', 'aggiornato_da', 'versione', 'progetto_id', 'giornata_id', 'spazio_id', 'tipo'],
@@ -1589,13 +1591,44 @@ var Staff = (function () {
 /**
  * CTRL · Eventi.
  *
- * - origine "calendar": titolo, date, orari, luogo, descrizione e colore arrivano dal
- *   Google Calendar e si modificano lì. In CTRL si aggiungono note e contenuti di produzione.
+ * - origine "calendar": titolo, date, orari, luogo, descrizione e colore arrivano dal Google Calendar (che CTRL legge soltanto).
+ *   Titolo, luogo, descrizione e date si possono correggere in CTRL (solo Owner): la correzione resta anche dopo la sincronizzazione;
+ *   se poi il Calendar cambia quel dato si segnala la differenza e l'Owner sceglie. Gli orari si correggono nelle giornate.
  * - origine "manuale": creati dall'admin, tutti i campi modificabili in CTRL.
  */
 var Events = (function () {
   var CAL_FIELDS = ['titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo', 'descrizione', 'colore'];
   var COLORE_DEFAULT = '#5b6472';
+  // dati del Calendar che l'Owner può correggere in CTRL (gli orari si correggono per giornata, il colore non cambia)
+  var CORREGGIBILI = ['titolo', 'data', 'data_fine', 'luogo', 'descrizione'];
+
+  function json_(txt) {
+    try { var o = txt ? JSON.parse(txt) : {}; return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch (err) { return {}; }
+  }
+  function vuoto_(o) { return !Object.keys(o).length; }
+  function testo_(o) { return vuoto_(o) ? '' : JSON.stringify(o); }
+
+  /**
+   * Sincronizzazione di un evento già noto: ritorna le modifiche da scrivere. I campi corretti a mano non si toccano:
+   * se il Calendar dice ancora quello che diceva quando li hai corretti non succede nulla, altrimenti si segna la differenza.
+   */
+  function patchSync(row, f) {
+    var patch = {};
+    var mod = json_(row.modificati), diff = json_(row.cal_diff);
+    var mod0 = testo_(mod), diff0 = testo_(diff);
+    CAL_FIELDS.forEach(function (k) {
+      var nuovo = f[k] || '';
+      if (Object.prototype.hasOwnProperty.call(mod, k)) {
+        if (nuovo === (row[k] || '')) { delete mod[k]; delete diff[k]; return; }   // il Calendar ora dice quello che hai scritto tu
+        if (nuovo === mod[k]) delete diff[k]; else diff[k] = nuovo;
+        return;
+      }
+      if ((row[k] || '') !== nuovo) patch[k] = f[k];
+    });
+    if (testo_(mod) !== mod0) patch.modificati = testo_(mod);
+    if (testo_(diff) !== diff0) patch.cal_diff = testo_(diff);
+    return patch;
+  }
 
   /** Per ogni evento: presenza di contenuti in piano, materiale, scheda (oggi: file allegati). */
   function contaSezioni() {
@@ -1621,6 +1654,11 @@ var Events = (function () {
       staff: st.staff(e.id), mio: st.mio(e.id), accesso: accesso, da_confermare: st.daConfermare(e.id)
     };
     v.giorni = gi.di(e);
+    if (user && Users.can(user, 'admin') && e.origine === 'calendar') {
+      var mod = json_(e.modificati), diff = json_(e.cal_diff), corr = {};
+      Object.keys(mod).forEach(function (k) { corr[k] = { calendario: mod[k], nuovo: Object.prototype.hasOwnProperty.call(diff, k) ? diff[k] : null }; });
+      v.correzioni = corr;
+    }
     if (user && Users.can(user, 'admin')) v.conflitti = gi.conflitti(e.id);
     if (user && Users.can(user, 'admin') && e.cartella_id) v.cartella_url = 'https://drive.google.com/drive/folders/' + e.cartella_id;
     return v;
@@ -1717,9 +1755,28 @@ var Events = (function () {
     var fieldsChanged = Object.keys(p).filter(function (k) { return CAL_FIELDS.indexOf(k) >= 0; });
     if (fieldsChanged.length) {
       Users.require(user, 'creareEventi');
-      if (e.origine === 'calendar') throw new CtrlError('INVALID', 'Questo evento arriva dal Google Calendar: modificalo lì');
       var f = validateFields(p, true);
-      Object.keys(f).forEach(function (k) { patch[k] = f[k]; });
+      if (e.origine === 'calendar') {
+        if (fieldsChanged.some(function (k) { return CORREGGIBILI.indexOf(k) < 0; })) {
+          throw new CtrlError('INVALID', 'Gli orari si correggono nella giornata; il colore arriva dal Google Calendar');
+        }
+        var mod = json_(e.modificati), diff = json_(e.cal_diff);
+        Object.keys(f).forEach(function (k) {
+          if ((e[k] || '') === (f[k] || '')) return;   // invariato
+          // il valore del Calendar da ricordare: quello nuovo se c'era una differenza da risolvere, altrimenti quello che diceva
+          var base = Object.prototype.hasOwnProperty.call(diff, k) ? diff[k]
+            : Object.prototype.hasOwnProperty.call(mod, k) ? mod[k] : (e[k] || '');
+          delete diff[k];
+          if ((f[k] || '') === base) delete mod[k]; else mod[k] = base;
+          patch[k] = f[k];
+        });
+        if (!Object.keys(patch).length) throw new CtrlError('INVALID', 'Nessuna modifica');
+        patch.modificati = testo_(mod);
+        patch.cal_diff = testo_(diff);
+        fieldsChanged = Object.keys(patch).filter(function (k) { return CAL_FIELDS.indexOf(k) >= 0; });
+      } else {
+        Object.keys(f).forEach(function (k) { patch[k] = f[k]; });
+      }
     }
     if ('note' in p) {
       Users.require(user, 'modificare');
@@ -1744,6 +1801,46 @@ var Events = (function () {
     });
   }
 
+  /**
+   * Corregge o ripristina i dati del Calendar di un evento. scelta:
+   *   "tieni"  → resta il tuo valore e la differenza segnalata si archivia;
+   *   "usa"    → torna il valore del Calendar (quello nuovo se c'è una differenza, altrimenti quello di prima).
+   * campo: uno solo, oppure tutti i campi corretti se manca.
+   */
+  function calendario(user, p) {
+    Users.require(user, 'creareEventi');
+    p = p || {};
+    var scelta = String(p.scelta || '');
+    if (scelta !== 'tieni' && scelta !== 'usa') throw new CtrlError('INVALID', 'Scelta non valida');
+    return Db.withLock(function () {
+      var e = Db.find('eventi', 'id', p.id);
+      if (!e) throw new CtrlError('NOT_FOUND', 'Evento non trovato');
+      if (e.origine !== 'calendar') throw new CtrlError('INVALID', 'Evento non proveniente dal Calendar');
+      var mod = json_(e.modificati), diff = json_(e.cal_diff);
+      var campi = p.campo ? [String(p.campo)] : Object.keys(mod);
+      campi.forEach(function (k) { if (CORREGGIBILI.indexOf(k) < 0 || !Object.prototype.hasOwnProperty.call(mod, k)) throw new CtrlError('INVALID', 'Campo non corretto a mano'); });
+      var patch = {};
+      campi.forEach(function (k) {
+        if (scelta === 'usa') {
+          patch[k] = Object.prototype.hasOwnProperty.call(diff, k) ? diff[k] : mod[k];
+          delete mod[k]; delete diff[k];
+        } else if (Object.prototype.hasOwnProperty.call(diff, k)) {
+          mod[k] = diff[k]; delete diff[k];   // ora la tua correzione è rispetto al Calendar di adesso
+          if (mod[k] === (e[k] || '')) delete mod[k];
+        }
+      });
+      patch.modificati = testo_(mod); patch.cal_diff = testo_(diff);
+      patch.aggiornato_il = Util.nowIso(); patch.aggiornato_da = user.email;
+      var before = JSON.parse(JSON.stringify(e));
+      var row = Db.update('eventi', 'id', e.id, patch);
+      var d = Storico.diff(before, row, CAL_FIELDS);
+      Storico.log(user.email, row.id, 'evento', scelta === 'usa' ? 'ripristino_calendario' : 'tieni_correzione', row.id, d.prima || '', d.dopo || '');
+      if (Object.keys(patch).some(function (k) { return CAL_FIELDS.indexOf(k) >= 0; })) { Giorni.riallinea(row, user.email); Turni.riallinea(row, user.email); }
+      if (patch.descrizione !== undefined) Staff.ricalcolaSicuro_();
+      return get(user, { id: row.id });
+    });
+  }
+
   function setStato(user, p) {
     Users.require(user, 'cestinare');
     var stato = String(p && p.stato || '');
@@ -1758,7 +1855,7 @@ var Events = (function () {
     });
   }
 
-  return { list: list, get: get, create: create, update: update, setStato: setStato, CAL_FIELDS: CAL_FIELDS, COLORE_DEFAULT: COLORE_DEFAULT };
+  return { list: list, get: get, create: create, update: update, calendario: calendario, patchSync: patchSync, setStato: setStato, CAL_FIELDS: CAL_FIELDS, COLORE_DEFAULT: COLORE_DEFAULT };
 })();
 
 // ===== 21_CalendarSync.js =====
@@ -1767,7 +1864,7 @@ var Events = (function () {
  *
  * Finestra: da 30 giorni fa a 365 giorni avanti.
  * - evento nuovo        → creato in CTRL (origine "calendar")
- * - evento cambiato     → aggiornati titolo, date, orari, luogo, descrizione, colore
+ * - evento cambiato     → aggiornati titolo, date, orari, luogo, descrizione, colore (tranne i dati corretti a mano in CTRL: se il Calendar cambia si segnala)
  * - evento sparito      → stato "annullato" (piano e materiale restano)
  * - evento ricomparso   → di nuovo "attivo"
  * - eventi "archiviati" e manuali non vengono mai toccati.
@@ -1856,8 +1953,7 @@ var CalendarSync = (function () {
           res.creati++;
           return;
         }
-        var patch = {};
-        Events.CAL_FIELDS.forEach(function (k) { if ((row[k] || '') !== (f[k] || '')) patch[k] = f[k]; });
+        var patch = Events.patchSync(row, f);   // i dati corretti a mano in CTRL non si toccano
         var rigaFinale = row;
         var reactivate = row.stato === 'annullato';
         if (reactivate) patch.stato = 'attivo';
@@ -3257,6 +3353,7 @@ var ACTIONS = {
   'eventi.get': { fn: function (u, p) { return Events.get(u, p); } },
   'eventi.create': { fn: function (u, p) { return Events.create(u, p); } },
   'eventi.update': { fn: function (u, p) { return Events.update(u, p); } },
+  'eventi.calendario': { fn: function (u, p) { return Events.calendario(u, p); } },
   'eventi.stato': { fn: function (u, p) { return Events.setStato(u, p); } },
 
   'allegati.carica': { fn: function (u, p) { return Allegati.carica(u, p); } },

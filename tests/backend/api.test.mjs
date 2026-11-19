@@ -261,11 +261,14 @@ test('sync Calendar: aggiorna, annulla, riattiva, non tocca manuali e archiviati
   assert.ok(imp.sync.ultimo);
 });
 
-test('sync Calendar: non permette di modificare i campi di un evento importato', () => {
+test('sync Calendar: di un evento importato si correggono titolo, luogo, descrizione e date, non orari né colore', () => {
   const env = boot([{ id: 'a@google.com', title: 'Da Calendar', allDay: true, start: isoDay(3), end: isoDay(4) }]);
   const t = login(env);
   const e = call(env.ctx, 'eventi.list', {}, t).data[0];
-  assert.equal(call(env.ctx, 'eventi.update', { id: e.id, titolo: 'Altro' }, t).error.code, 'INVALID');
+  assert.equal(call(env.ctx, 'eventi.update', { id: e.id, ora_inizio: '10:00' }, t).error.code, 'INVALID');
+  assert.equal(call(env.ctx, 'eventi.update', { id: e.id, colore: '#000000' }, t).error.code, 'INVALID');
+  assert.equal(call(env.ctx, 'eventi.update', { id: e.id, versione: e.versione, titolo: 'Altro' }, t).data.titolo, 'Altro');
+  e.versione = call(env.ctx, 'eventi.get', { id: e.id }, t).data.versione;
   const n = call(env.ctx, 'eventi.update', { id: e.id, versione: e.versione, note: 'Carico alle 15' }, t);
   assert.equal(n.ok, true);
   assert.equal(n.data.note, 'Carico alle 15');

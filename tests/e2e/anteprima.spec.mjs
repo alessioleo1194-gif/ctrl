@@ -62,30 +62,35 @@ async function scenario(page) {
   return env;
 }
 
-test('elenco: Load-in e Load-out sempre visibili nel riquadro, solo dove il piano li ha', async ({ page }, info) => {
+test('elenco: l\'orario della giornata compare una sola volta, come Load-in e Load-out, e segue le correzioni', async ({ page }, info) => {
   const env = await scenario(page);
   await login(page, env);
   const concerto = page.locator('.ev', { hasText: 'Concerto serale' });
-  await expect(concerto.locator('[data-k="load-in"]')).toContainText('14:00');
-  await expect(concerto.locator('[data-k="load-out"]')).toContainText('00:30');
+  await expect(concerto.locator('[data-k="load-in"]')).toContainText('21:00');
+  await expect(concerto.locator('[data-k="load-out"]')).toContainText('23:30');
+  expect(await concerto.locator('.lo > span').evaluateAll(x => x.map(e => e.dataset.k))).toEqual(['load-in', 'load-out']);
+  await expect(concerto.locator('.m')).not.toContainText(/\d\d:\d\d/);   // mai due volte
   const festa = page.locator('.ev', { hasText: 'Festa di paese' });
-  await expect(festa.locator('[data-k="load-in"]')).toContainText('16:30');
-  await expect(festa.locator('[data-k="load-out"]')).toHaveCount(0);
-  await expect(page.locator('.ev', { hasText: 'Aperitivo in giardino' }).locator('.lo')).toHaveCount(0);
+  await expect(festa.locator('[data-k="load-in"]')).toContainText('20:00');
+  await expect(festa.locator('[data-k="load-out"]')).toContainText('02:00 +1');
+  await expect(page.locator('.ev', { hasText: 'Aperitivo in giardino' }).locator('[data-k="load-in"]')).toContainText('18:00');
   await expect(page.locator('.ev', { hasText: 'Cena aziendale' }).locator('.lo')).toHaveCount(0);
-  // inizio e fine evento stanno negli stessi riquadri, accanto a Load-in e Load-out, e non si ripetono nella riga di testo
-  await expect(concerto.locator('[data-k="inizio"]')).toContainText('21:00');
-  await expect(concerto.locator('[data-k="fine"]')).toContainText('23:30');
-  expect(await concerto.locator('.lo > span').evaluateAll(x => x.map(e => e.dataset.k))).toEqual(['load-in', 'inizio', 'fine', 'load-out']);
-  await expect(concerto.locator('.m')).not.toContainText('21:00');
-  await expect(festa.locator('[data-k="inizio"]')).toContainText('20:00');
-  await expect(festa.locator('[data-k="fine"]')).toContainText('02:00');
-  // senza Load-in/Load-out l'orario resta nella riga di testo, come prima
-  await expect(page.locator('.ev', { hasText: 'Aperitivo in giardino' }).locator('.m')).toContainText('18:00');
+  // il Production Plan non cambia l'anteprima: la dicono gli orari della giornata
+  await expect(concerto).not.toContainText('14:00');
   expect(await page.locator('[role=list]').innerText()).not.toMatch(/\b(null|undefined)\b/);
   const w = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
   expect(w[0]).toBeLessThanOrEqual(w[1]);
   await page.screenshot({ path: `test-results/anteprima-loadinout-${info.project.name}.png`, fullPage: true });
+  // se correggo l'orario della giornata, cambia anche l'anteprima
+  const t = tokenFor(env, ADMIN);
+  const cena = dati(apiCall(env, t, 'eventi.list', {})).find(e => e.titolo === 'Cena aziendale');
+  const g = cena.giorni[0];
+  dati(apiCall(env, t, 'giorni.salva', { id: g.id, versione: g.versione, ora_inizio: '19:30', ora_fine: '23:00' }));
+  await page.reload();
+  await expect(page.getByRole('list')).toBeVisible();
+  const cenaRiga = page.locator('.ev', { hasText: 'Cena aziendale' });
+  await expect(cenaRiga.locator('[data-k="load-in"]')).toContainText('19:30');
+  await expect(cenaRiga.locator('[data-k="load-out"]')).toContainText('23:00');
 });
 
 test('elenco: una striscia di giornata separa i giorni, gli eventi dello stesso giorno stanno insieme', async ({ page }, info) => {

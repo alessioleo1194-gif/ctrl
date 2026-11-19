@@ -6,8 +6,9 @@ import { today } from '../format.js';
 /** Palette colori di Google Calendar + neutro. */
 export const PALETTE = ['#5b6472', '#7986cb', '#33b679', '#8e24aa', '#e67c73', '#f6bf26', '#f4511e', '#039be5', '#616161', '#3f51b5', '#0b8043', '#d50000'];
 
-/** Crea (ev = null) o modifica un evento manuale. */
+/** Crea (ev = null) o modifica un evento: i manuali per intero, quelli del Calendar solo titolo, date, luogo e descrizione. */
 export function openEventForm(ev, onSaved) {
+  const daCal = !!(ev && ev.origine === 'calendar');
   const v = ev || { titolo: '', data: today(), data_fine: '', ora_inizio: '', ora_fine: '', luogo: '', descrizione: '', colore: PALETTE[0] };
   let colore = v.colore || PALETTE[0];
   const f = (name, attrs = {}) => h('input', { class: 'input', name, value: v[name] || '', ...attrs });
@@ -25,20 +26,21 @@ export function openEventForm(ev, onSaved) {
     h('div', { class: 'grid2' },
       h('label', { class: 'field' }, h('span', {}, 'Data *'), f('data', { type: 'date', required: true })),
       h('label', { class: 'field' }, h('span', {}, 'Fino al (se più giorni)'), f('data_fine', { type: 'date' }))),
-    h('div', { class: 'grid2' },
+    daCal ? null : h('div', { class: 'grid2' },
       h('label', { class: 'field' }, h('span', {}, 'Ora inizio'), f('ora_inizio', { type: 'time' })),
       h('label', { class: 'field' }, h('span', {}, 'Ora fine'), f('ora_fine', { type: 'time' }))),
     h('label', { class: 'field' }, h('span', {}, 'Luogo'), f('luogo', { maxlength: 200 })),
     h('label', { class: 'field' }, h('span', {}, 'Descrizione'), h('textarea', { class: 'input', name: 'descrizione', maxlength: 5000 }, v.descrizione || '')),
-    h('div', { class: 'field' }, h('span', {}, 'Colore'), swatches),
+    daCal ? null : h('div', { class: 'field' }, h('span', {}, 'Colore'), swatches),
+    daCal ? h('p', { class: 'help' }, 'Evento del Google Calendar: le correzioni restano tue anche dopo l\'aggiornamento dal Calendar, che non viene modificato. Se il Calendar cambia lo stesso dato ti viene segnalato. Gli orari si correggono nella giornata, nella scheda dell\'evento.') : null,
     err,
     h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', onclick: () => dlg.close() }, 'Annulla'), save));
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    const payload = Object.fromEntries(['titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo', 'descrizione'].map(k => [k, String(fd.get(k) || '').trim()]));
-    payload.colore = colore;
+    const payload = Object.fromEntries((daCal ? ['titolo', 'data', 'data_fine', 'luogo', 'descrizione'] : ['titolo', 'data', 'data_fine', 'ora_inizio', 'ora_fine', 'luogo', 'descrizione']).map(k => [k, String(fd.get(k) || '').trim()]));
+    if (!daCal) payload.colore = colore;
     if (!payload.titolo) return (err.textContent = 'Il titolo è obbligatorio.');
     if (!payload.data) return (err.textContent = 'La data è obbligatoria.');
     if (payload.data_fine && payload.data_fine < payload.data) return (err.textContent = 'La data di fine precede quella di inizio.');
@@ -50,7 +52,7 @@ export function openEventForm(ev, onSaved) {
         : await api('eventi.create', payload);
       upsertEvent(out);
       dlg.close();
-      toast(ev ? 'Evento aggiornato' : 'Evento creato');
+      toast(ev ? (daCal ? 'Correzione salvata' : 'Evento aggiornato') : 'Evento creato');
       if (onSaved) onSaved(out); else navigate('#/e/' + out.id);
     } catch (x) {
       err.textContent = x.code === 'CONFLICT' ? 'Qualcun altro ha modificato l\'evento: chiudi e riapri per vedere la versione aggiornata.' : x.message;
